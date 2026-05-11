@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../onboarding/onboarding_view.dart';
+import '../../services/offline_service.dart';
+import '../home/home_page.dart';
+import '../company/company_home_page.dart';
+import '../auth/login_view.dart';
 
 class SplashView extends StatefulWidget {
   const SplashView({super.key});
@@ -19,9 +23,28 @@ class _SplashViewState extends State<SplashView> {
   Future<void> _navigateToOnboarding() async {
     await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const OnboardingView()),
-    );
+
+    final hasSeenOnboarding = OfflineService.hasSeenOnboarding;
+    final loggedInUser = OfflineService.getLoggedInUser();
+
+    if (!hasSeenOnboarding) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const OnboardingView()),
+      );
+    } else if (loggedInUser != null) {
+      final role = loggedInUser['role']?.toString();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => role == 'company'
+              ? CompanyHomePage(userData: loggedInUser)
+              : HomePage(userData: loggedInUser),
+        ),
+      );
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const LoginView()),
+      );
+    }
   }
 
   @override

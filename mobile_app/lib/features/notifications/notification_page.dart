@@ -4,6 +4,7 @@ import '../cv/cv_controller.dart';
 import '../cv/cv_detail_view.dart';
 import '../company/company_applicant_detail_page.dart';
 import '../applications/applications_page.dart';
+import 'job_seeker_notification_detail_page.dart';
 
 class NotificationPage extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -59,15 +60,19 @@ class _NotificationPageState extends State<NotificationPage> {
   }
 
   Future<void> _handleNotificationClick(Map<String, dynamic> notification) async {
-    // 1. Mark as read in DB if not already read
     if (notification['is_read'] == false) {
       final notificationId = MongoService.getMongoId(notification['_id']);
-      await MongoService.markNotificationAsRead(notificationId: notificationId);
-      
-      // Update local state instead of full reload to prevent "disappearing" feel
+
+      await MongoService.markNotificationAsRead(
+        notificationId: notificationId,
+      );
+
       if (mounted) {
         setState(() {
-          final index = _notifications.indexWhere((n) => MongoService.getMongoId(n['_id']) == notificationId);
+          final index = _notifications.indexWhere(
+            (n) => MongoService.getMongoId(n['_id']) == notificationId,
+          );
+
           if (index != -1) {
             _notifications[index]['is_read'] = true;
           }
@@ -75,21 +80,28 @@ class _NotificationPageState extends State<NotificationPage> {
       }
     }
 
-    // 2. Navigation logic
     if (!mounted) return;
 
     final type = notification['type']?.toString() ?? '';
     final role = widget.role;
 
     if (role == 'company' && type == 'new_application') {
-      _navigateToApplicantDetail(notification['application_id'], notification['job_id']);
-    } else if (role == 'job_seeker' && (type.startsWith('application_') || type == 'interview_schedule')) {
-      // Navigate to Applications Page index (usually index 1)
-      Navigator.of(context).popUntil((route) => route.isFirst);
-      // We assume the first page visited is HomePage/CompanyHomePage
-      // This is a simpler way to ensure the user lands on the right context
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Membuka daftar lamaran Anda...')),
+      _navigateToApplicantDetail(
+        notification['application_id'],
+        notification['job_id'],
+      );
+    } else if (role == 'job_seeker' &&
+        (type.startsWith('application_') ||
+            type == 'interview_schedule' ||
+            type == 'interview_call' ||
+            type == 'application_status')) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobSeekerNotificationDetailPage(
+            notification: notification,
+          ),
+        ),
       );
     }
   }

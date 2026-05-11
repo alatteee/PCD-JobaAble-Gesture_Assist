@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
 import '../job_detail/job_detail_page.dart';
@@ -27,23 +28,31 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late int _selectedIndex;
+
   List jobs = [];
   List filteredJobs = [];
   Set<String> savedJobIds = {};
+
   bool isLoading = true;
+  bool _isOpeningNotificationPage = false;
+
   String selectedCategory = 'Semua';
   String searchQuery = '';
+
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _selectedIndex = widget.initialIndex.clamp(0, 2).toInt();
+
+    _selectedIndex = widget.initialIndex.clamp(0, 3).toInt();
+
     if (widget.showSuccessDialog) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showSuccessBottomSheet();
       });
     }
+
     fetchJobs();
   }
 
@@ -66,12 +75,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> fetchJobs() async {
+    if (mounted) {
       setState(() {
-      isLoading = true;
-    });
+        isLoading = true;
+      });
+    }
 
     final data = await MongoService.getJobVacancies();
-    final savedIds = await MongoService.getSavedJobIds(userId: _currentUserId);
+    final savedIds = await MongoService.getSavedJobIds(
+      userId: _currentUserId,
+    );
 
     if (!mounted) return;
 
@@ -80,6 +93,7 @@ class _HomePageState extends State<HomePage> {
       savedJobIds = savedIds;
       isLoading = false;
     });
+
     applyFilters();
   }
 
@@ -102,7 +116,11 @@ class _HomePageState extends State<HomePage> {
         ),
         content: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 22),
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 22,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -133,9 +151,16 @@ class _HomePageState extends State<HomePage> {
     }
 
     final alreadySaved = savedJobIds.contains(jobId);
+
     final success = alreadySaved
-        ? await MongoService.unsaveJob(userId: _currentUserId, jobId: jobId)
-        : await MongoService.saveJob(userId: _currentUserId, jobId: jobId);
+        ? await MongoService.unsaveJob(
+            userId: _currentUserId,
+            jobId: jobId,
+          )
+        : await MongoService.saveJob(
+            userId: _currentUserId,
+            jobId: jobId,
+          );
 
     if (!mounted) return;
 
@@ -153,7 +178,8 @@ class _HomePageState extends State<HomePage> {
             ? 'Lowongan dihapus dari tersimpan'
             : 'Lowongan berhasil disimpan',
         icon: alreadySaved ? Icons.bookmark_border : Icons.bookmark,
-        backgroundColor: alreadySaved ? Colors.grey.shade800 : AppColors.primaryNavy,
+        backgroundColor:
+            alreadySaved ? Colors.grey.shade800 : AppColors.primaryNavy,
       );
     } else {
       _showCustomSnackBar(
@@ -195,6 +221,8 @@ class _HomePageState extends State<HomePage> {
           .toList();
     }
 
+    if (!mounted) return;
+
     setState(() {
       filteredJobs = result;
     });
@@ -214,13 +242,19 @@ class _HomePageState extends State<HomePage> {
       builder: (BuildContext ctx) {
         return Container(
           height: 440,
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 24.0,
+            vertical: 32.0,
+          ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const SizedBox(height: 24),
               TweenAnimationBuilder<double>(
-                tween: Tween<double>(begin: 0.0, end: 1.0),
+                tween: Tween<double>(
+                  begin: 0.0,
+                  end: 1.0,
+                ),
                 duration: const Duration(milliseconds: 700),
                 curve: Curves.elasticOut,
                 builder: (context, scale, child) {
@@ -281,22 +315,53 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _getGreeting() {
-    var hour = DateTime.now().hour;
+    final hour = DateTime.now().hour;
+
     if (hour < 11) return 'Selamat Pagi';
     if (hour < 15) return 'Selamat Siang';
     if (hour < 18) return 'Selamat Sore';
+
     return 'Selamat Malam';
   }
 
   void _onItemTapped(int index) {
+    if (_selectedIndex == index) return;
+
     setState(() {
       _selectedIndex = index;
     });
   }
 
+  Future<void> _openNotificationPage() async {
+    if (_isOpeningNotificationPage) return;
+
+    setState(() {
+      _isOpeningNotificationPage = true;
+    });
+
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => NotificationPage(
+            currentUser: widget.userData,
+            role: 'job_seeker',
+          ),
+        ),
+      );
+    } finally {
+      if (!mounted) return;
+
+      setState(() {
+        _isOpeningNotificationPage = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     final List<Widget> pages = [
       _buildBeranda(context),
       ApplicationsPage(currentUser: widget.userData),
@@ -308,11 +373,19 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _selectedIndex == 0 ? _buildBerandaAppBar() : _buildOtherAppBar(),
       body: SafeArea(
-        child: pages[_selectedIndex],
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: KeyedSubtree(
+            key: ValueKey<int>(_selectedIndex),
+            child: pages[_selectedIndex],
+          ),
+        ),
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: theme.brightness == Brightness.dark ? Colors.yellow : AppColors.primaryNavy,
+          color: theme.brightness == Brightness.dark
+              ? Colors.yellow
+              : AppColors.primaryNavy,
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(24),
             topRight: Radius.circular(24),
@@ -324,18 +397,36 @@ class _HomePageState extends State<HomePage> {
             topRight: Radius.circular(24),
           ),
           child: BottomNavigationBar(
-            backgroundColor: theme.brightness == Brightness.dark ? Colors.yellow : AppColors.primaryNavy,
+            backgroundColor: theme.brightness == Brightness.dark
+                ? Colors.yellow
+                : AppColors.primaryNavy,
             elevation: 0,
             type: BottomNavigationBarType.fixed,
-            selectedItemColor: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
-            unselectedItemColor: theme.brightness == Brightness.dark ? Colors.black.withOpacity(0.6) : Colors.white70,
+            selectedItemColor: theme.brightness == Brightness.dark
+                ? Colors.black
+                : Colors.white,
+            unselectedItemColor: theme.brightness == Brightness.dark
+                ? Colors.black.withOpacity(0.6)
+                : Colors.white70,
             currentIndex: _selectedIndex,
             onTap: _onItemTapped,
             items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Beranda'),
-              BottomNavigationBarItem(icon: Icon(Icons.cases_outlined), label: 'Lamaran'),
-              BottomNavigationBarItem(icon: Icon(Icons.description), label: 'CV'),
-              BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.home),
+                label: 'Beranda',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.cases_outlined),
+                label: 'Lamaran',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.description),
+                label: 'CV',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.person),
+                label: 'Profil',
+              ),
             ],
           ),
         ),
@@ -345,8 +436,8 @@ class _HomePageState extends State<HomePage> {
 
   AppBar _buildBerandaAppBar() {
     final theme = Theme.of(context);
-    final String userId = _currentUserId; // Cache local variable
-    
+    final String userId = _currentUserId;
+
     return AppBar(
       backgroundColor: theme.appBarTheme.backgroundColor,
       elevation: 0,
@@ -354,10 +445,25 @@ class _HomePageState extends State<HomePage> {
       automaticallyImplyLeading: false,
       title: RichText(
         text: TextSpan(
-          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+          ),
           children: [
-            TextSpan(text: 'Job', style: TextStyle(color: theme.colorScheme.primary)),
-            TextSpan(text: 'Able', style: TextStyle(color: theme.brightness == Brightness.dark ? Colors.yellow : AppColors.accentBlue)),
+            TextSpan(
+              text: 'Job',
+              style: TextStyle(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            TextSpan(
+              text: 'Able',
+              style: TextStyle(
+                color: theme.brightness == Brightness.dark
+                    ? Colors.yellow
+                    : AppColors.accentBlue,
+              ),
+            ),
           ],
         ),
       ),
@@ -369,56 +475,61 @@ class _HomePageState extends State<HomePage> {
               receiverRole: 'job_seeker',
             ),
             builder: (context, snapshot) {
-              final hasUnread = (snapshot.data ?? 0) > 0;
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  IconButton(
-                    onPressed: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => NotificationPage(
-                            currentUser: widget.userData,
-                            role: 'job_seeker',
-                          ),
-                        ),
-                      );
-                      setState(() {}); // Refresh to update unread indicator
-                    },
-                    icon: Icon(
-                      Icons.notifications,
-                      color: theme.colorScheme.primary,
-                      size: 30,
-                    ),
-                  ),
-                  if (hasUnread)
-                    Positioned(
-                      right: 8,
-                      top: 12,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: theme.scaffoldBackgroundColor, width: 2),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        child: Text(
-                          '${snapshot.data}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
+              final unreadCount = snapshot.data ?? 0;
+              final hasUnread = unreadCount > 0;
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Notifikasi',
+                      onPressed: _isOpeningNotificationPage
+                          ? null
+                          : _openNotificationPage,
+                      icon: Icon(
+                        Icons.notifications,
+                        color: theme.colorScheme.primary,
+                        size: 30,
                       ),
                     ),
-                ],
+
+                    if (hasUnread)
+                      Positioned(
+                        right: 6,
+                        top: 10,
+                        child: IgnorePointer(
+                          ignoring: true,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: theme.scaffoldBackgroundColor,
+                                width: 2,
+                              ),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            child: Text(
+                              unreadCount > 99 ? '99+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               );
             },
           ),
@@ -429,10 +540,13 @@ class _HomePageState extends State<HomePage> {
 
   AppBar _buildOtherAppBar() {
     final theme = Theme.of(context);
+
     String title = 'Profil Saya';
+
     if (_selectedIndex == 1) title = 'Lamaran Saya';
     if (_selectedIndex == 2) title = 'CV Digital';
-    
+    if (_selectedIndex == 3) title = 'Profil Saya';
+
     return AppBar(
       backgroundColor: theme.appBarTheme.backgroundColor,
       elevation: 0,
@@ -454,6 +568,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildBeranda(BuildContext context) {
     final theme = Theme.of(context);
+
     return RefreshIndicator(
       color: theme.colorScheme.primary,
       onRefresh: fetchJobs,
@@ -474,57 +589,87 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 20),
             Container(
               decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
+                color: theme.brightness == Brightness.dark
+                    ? Colors.black
+                    : Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: theme.dividerColor),
+                border: Border.all(
+                  color: theme.dividerColor,
+                ),
               ),
               child: TextField(
                 controller: _searchController,
-                style: TextStyle(color: theme.textTheme.bodyLarge?.color),
+                style: TextStyle(
+                  color: theme.textTheme.bodyLarge?.color,
+                ),
                 onChanged: (value) {
                   searchQuery = value;
                   applyFilters();
                 },
                 decoration: InputDecoration(
                   hintText: 'Cari Lowongan Pekerjaan...',
-                  hintStyle: TextStyle(color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6)),
+                  hintStyle: TextStyle(
+                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+                  ),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            // Accessibility Toggle Below Search Bar
             ValueListenableBuilder<bool>(
               valueListenable: AccessibilityController.highContrastNotifier,
               builder: (context, isHighContrast, _) {
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color: isHighContrast ? Colors.black : AppColors.primaryNavy.withOpacity(0.05),
+                    color: isHighContrast
+                        ? Colors.black
+                        : AppColors.primaryNavy.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(12),
-                    border: isHighContrast ? Border.all(color: Colors.yellow, width: 2) : null,
+                    border: isHighContrast
+                        ? Border.all(
+                            color: Colors.yellow,
+                            width: 2,
+                          )
+                        : null,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.visibility,
-                            size: 20,
-                            color: isHighContrast ? Colors.yellow : AppColors.primaryNavy,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Mode Kontras Tinggi',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: isHighContrast ? Colors.yellow : AppColors.primaryNavy,
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.visibility,
+                              size: 20,
+                              color: isHighContrast
+                                  ? Colors.yellow
+                                  : AppColors.primaryNavy,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Mode Kontras Tinggi',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: isHighContrast
+                                      ? Colors.yellow
+                                      : AppColors.primaryNavy,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       Switch(
                         value: isHighContrast,
@@ -536,8 +681,11 @@ class _HomePageState extends State<HomePage> {
                             message: value
                                 ? 'Mode Kontras Tinggi Diaktifkan'
                                 : 'Mode Kontras Tinggi Dimatikan',
-                            icon: value ? Icons.visibility : Icons.visibility_off,
-                            backgroundColor: value ? Colors.black : Colors.grey.shade800,
+                            icon: value
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                            backgroundColor:
+                                value ? Colors.black : Colors.grey.shade800,
                           );
                         },
                       ),
@@ -557,7 +705,10 @@ class _HomePageState extends State<HomePage> {
                       });
                       applyFilters();
                     },
-                    child: _CategoryButton('Semua', selectedCategory == 'Semua'),
+                    child: _CategoryButton(
+                      'Semua',
+                      selectedCategory == 'Semua',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -569,7 +720,10 @@ class _HomePageState extends State<HomePage> {
                       });
                       applyFilters();
                     },
-                    child: _CategoryButton('Teknologi', selectedCategory == 'Teknologi'),
+                    child: _CategoryButton(
+                      'Teknologi',
+                      selectedCategory == 'Teknologi',
+                    ),
                   ),
                 ),
               ],
@@ -585,7 +739,10 @@ class _HomePageState extends State<HomePage> {
                       });
                       applyFilters();
                     },
-                    child: _CategoryButton('Marketing', selectedCategory == 'Marketing'),
+                    child: _CategoryButton(
+                      'Marketing',
+                      selectedCategory == 'Marketing',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -597,7 +754,10 @@ class _HomePageState extends State<HomePage> {
                       });
                       applyFilters();
                     },
-                    child: _CategoryButton('Admin', selectedCategory == 'Admin'),
+                    child: _CategoryButton(
+                      'Admin',
+                      selectedCategory == 'Admin',
+                    ),
                   ),
                 ),
               ],
@@ -613,13 +773,25 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 16),
             if (isLoading)
-              Center(child: CircularProgressIndicator(color: theme.colorScheme.primary))
+              Center(
+                child: CircularProgressIndicator(
+                  color: theme.colorScheme.primary,
+                ),
+              )
             else if (filteredJobs.isEmpty)
-              Center(child: Text('Belum ada lowongan', style: TextStyle(color: theme.textTheme.bodyMedium?.color)))
+              Center(
+                child: Text(
+                  'Belum ada lowongan',
+                  style: TextStyle(
+                    color: theme.textTheme.bodyMedium?.color,
+                  ),
+                ),
+              )
             else
               ...filteredJobs.map(
                 (job) {
                   final jobMap = Map<String, dynamic>.from(job);
+
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: _JobCard(
@@ -628,6 +800,7 @@ class _HomePageState extends State<HomePage> {
                       location: jobMap['location'] ?? '-',
                       type: jobMap['job_type'] ?? '-',
                       desc: jobMap['description'] ?? '-',
+                      jobPhoto: jobMap['job_photo'], // Tambahkan ini
                       isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
                       onSave: () => toggleSaveJob(jobMap),
                       onDetail: () {
@@ -653,7 +826,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildProfil(BuildContext context) {
-    return ProfileView(currentUser: widget.userData);
+    return ProfileView(
+      currentUser: widget.userData,
+    );
   }
 }
 
@@ -661,7 +836,10 @@ class _CategoryButton extends StatelessWidget {
   final String title;
   final bool isSelected;
 
-  const _CategoryButton(this.title, this.isSelected);
+  const _CategoryButton(
+    this.title,
+    this.isSelected,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -669,7 +847,9 @@ class _CategoryButton extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(
+        vertical: 12,
+      ),
       decoration: BoxDecoration(
         color: isSelected
             ? theme.colorScheme.primary
@@ -701,6 +881,7 @@ class _JobCard extends StatelessWidget {
   final String location;
   final String type;
   final String desc;
+  final String? jobPhoto; // Tambahkan ini
   final bool isSaved;
   final VoidCallback? onDetail;
   final VoidCallback? onSave;
@@ -711,6 +892,7 @@ class _JobCard extends StatelessWidget {
     required this.location,
     required this.type,
     required this.desc,
+    this.jobPhoto, // Tambahkan ini
     required this.isSaved,
     this.onDetail,
     this.onSave,
@@ -726,55 +908,109 @@ class _JobCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? Colors.black : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? Colors.yellow : Colors.grey.shade200),
+        border: Border.all(
+          color: isDark ? Colors.yellow : Colors.grey.shade200,
+        ),
         boxShadow: isDark
             ? null
             : const [
-                BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
               ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.yellow : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            company,
-            style: TextStyle(
-              color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 12),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.location_on,
-                  size: 16, color: isDark ? Colors.yellow : AppColors.textGray),
-              const SizedBox(width: 4),
-              Text(
-                location,
-                style: TextStyle(
-                  color: isDark ? Colors.yellow : AppColors.textGray,
-                  fontSize: 13,
+              if (jobPhoto != null)
+                Container(
+                  width: 56,
+                  height: 56,
+                  margin: const EdgeInsets.only(right: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    image: DecorationImage(
+                      image: MemoryImage(base64Decode(jobPhoto!)),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.yellow : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      company,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isDark
+                            ? Colors.yellow.withOpacity(0.7)
+                            : AppColors.textGray,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 16),
-              Icon(Icons.work,
-                  size: 16, color: isDark ? Colors.yellow : AppColors.textGray),
-              const SizedBox(width: 4),
-              Text(
-                type,
-                style: TextStyle(
-                  color: isDark ? Colors.yellow : AppColors.textGray,
-                  fontSize: 13,
-                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.location_on,
+                    size: 16,
+                    color: isDark ? Colors.yellow : AppColors.textGray,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    location,
+                    style: TextStyle(
+                      color: isDark ? Colors.yellow : AppColors.textGray,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.work,
+                    size: 16,
+                    color: isDark ? Colors.yellow : AppColors.textGray,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    type,
+                    style: TextStyle(
+                      color: isDark ? Colors.yellow : AppColors.textGray,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -784,7 +1020,8 @@ class _JobCard extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: isDark ? Colors.yellow.withOpacity(0.8) : AppColors.textGray,
+              color:
+                  isDark ? Colors.yellow.withOpacity(0.8) : AppColors.textGray,
               fontSize: 12,
               height: 1.4,
             ),
@@ -796,16 +1033,22 @@ class _JobCard extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: onDetail,
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                    ),
                     foregroundColor: isDark ? Colors.yellow : Colors.black87,
-                    side: BorderSide(color: isDark ? Colors.yellow : Colors.black87),
+                    side: BorderSide(
+                      color: isDark ? Colors.yellow : Colors.black87,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                   child: const Text(
                     'Lihat Detail',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -820,22 +1063,24 @@ class _JobCard extends StatelessWidget {
                         ? (isDark ? Colors.black : Colors.white)
                         : (isDark ? Colors.yellow : Colors.black87),
                   ),
-                  label: Flexible(
-                    child: Text(
-                      isSaved ? 'Lowongan Tersimpan' : 'Simpan Lowongan',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isSaved
-                            ? (isDark ? Colors.black : Colors.white)
-                            : (isDark ? Colors.yellow : Colors.black87),
-                      ),
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
+                  label: Text(
+                    isSaved ? 'Tersimpan' : 'Simpan',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isSaved
+                          ? (isDark ? Colors.black : Colors.white)
+                          : (isDark ? Colors.yellow : Colors.black87),
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 4,
+                    ),
                     elevation: 0,
                     backgroundColor: isSaved
                         ? (isDark ? Colors.yellow : AppColors.primaryNavy)
@@ -843,7 +1088,11 @@ class _JobCard extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(
-                        color: isDark ? Colors.yellow : (isSaved ? AppColors.primaryNavy : Colors.black87),
+                        color: isDark
+                            ? Colors.yellow
+                            : (isSaved
+                                ? AppColors.primaryNavy
+                                : Colors.black87),
                       ),
                     ),
                   ),

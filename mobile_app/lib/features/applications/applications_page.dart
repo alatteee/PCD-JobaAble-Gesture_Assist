@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
 
@@ -172,6 +173,7 @@ class _ApplicationsPageState extends State<ApplicationsPage> {
                           company: application['company_name']?.toString() ?? '-',
                           statusLabel: _statusToFilter(application['status']?.toString()),
                           dateText: _formatDate(application['created_at']),
+                          jobPhoto: application['job_photo']?.toString(), // Tambahkan ini
                         ),
                       );
                     }),
@@ -227,12 +229,14 @@ class _ApplicationCard extends StatelessWidget {
   final String company;
   final String statusLabel;
   final String dateText;
+  final String? jobPhoto; // Tambahkan ini
 
   const _ApplicationCard({
     required this.title,
     required this.company,
     required this.statusLabel,
     required this.dateText,
+    this.jobPhoto, // Tambahkan ini
   });
 
   IconData _getIcon() {
@@ -263,12 +267,21 @@ class _ApplicationCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            width: 52, // Atur ukuran tetap
+            height: 52,
             decoration: BoxDecoration(
               color: theme.colorScheme.primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
+              image: jobPhoto != null
+                  ? DecorationImage(
+                      image: MemoryImage(base64Decode(jobPhoto!)),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            child: Icon(_getIcon(), color: theme.colorScheme.primary, size: 28),
+            child: jobPhoto == null
+                ? Icon(_getIcon(), color: theme.colorScheme.primary, size: 28)
+                : null,
           ),
           const SizedBox(width: 16),
           Expanded(

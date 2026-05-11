@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 // import library lottie
 import '../../core/constants/app_colors.dart';
 import '../../core/widgets/custom_text_field.dart';
+import 'forgot_password_view.dart';
 import 'sign_up_view.dart';
 import 'auth_controller.dart';
 import '../home/home_page.dart'; // import page home (tujuan berhasil)
@@ -44,12 +45,13 @@ class _LoginViewState extends State<LoginView> {
 
       final role = user['role']?.toString();
 
-      Navigator.of(context).pushReplacement(
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (_) => role == 'company'
               ? CompanyHomePage(userData: user, showSuccessDialog: true)
               : HomePage(userData: user, showSuccessDialog: true),
         ),
+        (route) => false,
       );
     } else {
       if (!mounted) return;
@@ -164,7 +166,11 @@ class _LoginViewState extends State<LoginView> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () {},
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const ForgotPasswordView()),
+                            );
+                          },
                           child: Text(
                             'Forgot Password?',
                             style: TextStyle(

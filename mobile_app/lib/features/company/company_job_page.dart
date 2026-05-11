@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
 import 'company_job_detail_page.dart';
+import 'dart:convert';
 
 class CompanyJobPage extends StatefulWidget {
   final String companyId;
@@ -318,6 +319,7 @@ class _CompanyJobPageState extends State<CompanyJobPage> {
     final location = job['location']?.toString() ?? '-';
     final jobType = job['job_type']?.toString() ?? '-';
     final status = job['status']?.toString() ?? '-';
+    final String? jobPhoto = job['job_photo'];
 
     return GestureDetector(
       onTap: () async {
@@ -338,16 +340,16 @@ class _CompanyJobPageState extends State<CompanyJobPage> {
         }
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 18),
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(26),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 13,
-              offset: const Offset(0, 6),
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -362,12 +364,20 @@ class _CompanyJobPageState extends State<CompanyJobPage> {
                   decoration: BoxDecoration(
                     color: lightGrey,
                     borderRadius: BorderRadius.circular(12),
+                    image: jobPhoto != null
+                        ? DecorationImage(
+                            image: MemoryImage(base64Decode(jobPhoto)),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
                   ),
-                  child: Icon(
-                    _getJobIcon(title),
-                    size: 38,
-                    color: navy,
-                  ),
+                  child: jobPhoto == null
+                      ? Icon(
+                          _getJobIcon(title),
+                          size: 38,
+                          color: navy,
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 14),
                 Expanded(

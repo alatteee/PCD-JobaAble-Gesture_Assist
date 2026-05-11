@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 
 class CompanyEditJobPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -26,6 +28,7 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
   String selectedJobType = 'Full Time';
   bool isDisabilityFriendly = true;
   List<String> facilities = [];
+  String? jobPhotoBase64;
 
   @override
   void initState() {
@@ -51,6 +54,8 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
     qualificationController = TextEditingController(
       text: qualifications.map((item) => '• $item').join('\n'),
     );
+
+    jobPhotoBase64 = widget.job['job_photo']?.toString();
   }
 
   @override
@@ -58,8 +63,33 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
     titleController.dispose();
     locationController.dispose();
     descriptionController.dispose();
-    qualificationController.dispose();
+     qualificationController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+
+      if (pickedFile == null) return;
+
+      final bytes = await pickedFile.readAsBytes();
+      final base64String = base64Encode(bytes);
+
+      setState(() {
+        jobPhotoBase64 = base64String;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal memilih gambar: $e')),
+        );
+      }
+    }
   }
 
   List<String> _toStringList(dynamic value) {
@@ -134,6 +164,7 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
         'qualification': qualifications,
         'facilities': facilities,
         'is_disability_friendly': isDisabilityFriendly,
+        'job_photo': jobPhotoBase64,
       },
     );
 
@@ -163,6 +194,11 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
             _buildHeader(context),
             const SizedBox(height: 24),
 
+            _label('Foto Lowongan'),
+            const SizedBox(height: 10),
+            _buildJobPhotoPicker(),
+
+            const SizedBox(height: 22),
             _label('Nama Pekerjaan'),
             const SizedBox(height: 10),
             _inputField(
@@ -256,6 +292,56 @@ class _CompanyEditJobPageState extends State<CompanyEditJobPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildJobPhotoPicker() {
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Container(
+        width: double.infinity,
+        height: 160,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade300),
+          image: jobPhotoBase64 != null
+              ? DecorationImage(
+                  image: MemoryImage(base64Decode(jobPhotoBase64!)),
+                  fit: BoxFit.cover,
+                )
+              : null,
+        ),
+        child: jobPhotoBase64 == null
+            ? const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_photo_alternate_outlined,
+                      color: Color(0xFF0D1B55), size: 48),
+                  SizedBox(height: 8),
+                  Text(
+                    'Ubah Foto Lowongan',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0D1B55),
+                    ),
+                  ),
+                ],
+              )
+            : Align(
+                alignment: Alignment.topRight,
+                child: Container(
+                  margin: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit, color: Colors.white, size: 18),
+                ),
+              ),
+      ),
     );
   }
 

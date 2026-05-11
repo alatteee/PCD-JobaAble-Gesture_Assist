@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../apply_job/apply_job_page.dart';
 import '../profile/profile_controller.dart';
@@ -48,6 +49,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
     final String jobType = widget.job['job_type'] ?? '-';
     final String description =
         widget.job['description'] ?? 'Tidak ada deskripsi.';
+    final String? jobPhoto = widget.job['job_photo'];
 
     final List qualifications = (widget.job['qualification'] is List)
         ? widget.job['qualification']
@@ -82,14 +84,24 @@ class _JobDetailPageState extends State<JobDetailPage> {
             height: 56,
             width: 56,
             decoration: BoxDecoration(
-              color: isDark ? Colors.yellow.withOpacity(0.1) : AppColors.primaryNavy.withOpacity(0.08),
+              color: isDark
+                  ? Colors.yellow.withOpacity(0.1)
+                  : AppColors.primaryNavy.withOpacity(0.08),
               borderRadius: BorderRadius.circular(16),
+              image: jobPhoto != null
+                  ? DecorationImage(
+                      image: MemoryImage(base64Decode(jobPhoto)),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            child: Icon(
-              Icons.headset_mic,
-              color: theme.colorScheme.primary,
-              size: 36,
-            ),
+            child: jobPhoto == null
+                ? Icon(
+                    Icons.business_center_rounded,
+                    color: theme.colorScheme.primary,
+                    size: 36,
+                  )
+                : null,
           ),
           const SizedBox(width: 16),
           Expanded(

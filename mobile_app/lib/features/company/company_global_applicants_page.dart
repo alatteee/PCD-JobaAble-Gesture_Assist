@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../services/mongo_service.dart';
@@ -36,7 +39,57 @@ class _CompanyGlobalApplicantsPageState
   String selectedFilter = 'Semua';
   String searchQuery = '';
 
+  List<Map<String, dynamic>> enrichedApplicants = [];
+  bool isEnrichingApplicants = true;
+
   final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEnrichedApplicants();
+  }
+
+  @override
+  void didUpdateWidget(covariant CompanyGlobalApplicantsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.applicants != widget.applicants) {
+      _loadEnrichedApplicants();
+    }
+  }
+
+  Future<void> _loadEnrichedApplicants() async {
+    setState(() => isEnrichingApplicants = true);
+
+    final data =
+        await MongoService.enrichApplicantsWithUserDetails(widget.applicants);
+
+    if (!mounted) return;
+
+    setState(() {
+      enrichedApplicants = data;
+      isEnrichingApplicants = false;
+    });
+  }
+
+  String _cleanBase64Image(String value) {
+    var cleaned = value.trim();
+
+    if (cleaned.contains(',')) {
+      cleaned = cleaned.split(',').last;
+    }
+
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), '');
+
+    return cleaned;
+  }
+
+  bool _isLikelyLocalFilePath(String value) {
+    return value.startsWith('/data/') ||
+        value.startsWith('/storage/') ||
+        value.startsWith('/sdcard/');
+  }
 
   String _normalizeStatus(String status) {
     final value = status.toLowerCase();
@@ -105,7 +158,7 @@ class _CompanyGlobalApplicantsPageState
   }
 
   List<Map<String, dynamic>> get filteredApplicants {
-    return widget.applicants.where((applicant) {
+    return enrichedApplicants.where((applicant) {
       final name = applicant['full_name']?.toString().toLowerCase() ?? '';
       final jobTitle = applicant['job_title']?.toString().toLowerCase() ?? '';
       final status = applicant['status']?.toString().toLowerCase() ?? '';
@@ -153,6 +206,91 @@ class _CompanyGlobalApplicantsPageState
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
 
+  Widget _buildApplicantAvatar({
+    required String name,
+    required String profilePhoto,
+    double radius = 34,
+  }) {
+    Widget fallbackAvatar() {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: lightBlue,
+        child: Text(
+          _getInitials(name),
+          style: TextStyle(
+            color: navy,
+            fontSize: radius >= 34 ? 22 : 15,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+    }
+
+    final photo = profilePhoto.trim();
+
+    if (photo.isEmpty) {
+      return fallbackAvatar();
+    }
+
+    try {
+      if (photo.startsWith('http')) {
+        return ClipOval(
+          child: Image.network(
+            photo,
+            width: radius * 2,
+            height: radius * 2,
+            fit: BoxFit.cover,
+            errorBuilder: (_, error, ___) {
+              debugPrint('DEBUG IMAGE NETWORK ERROR $name: $error');
+              return fallbackAvatar();
+            },
+          ),
+        );
+      }
+
+      if (_isLikelyLocalFilePath(photo)) {
+        return ClipOval(
+          child: Image.file(
+            File(photo),
+            width: radius * 2,
+            height: radius * 2,
+            fit: BoxFit.cover,
+            errorBuilder: (_, error, ___) {
+              debugPrint('DEBUG IMAGE FILE ERROR $name: $error');
+              return fallbackAvatar();
+            },
+          ),
+        );
+      }
+
+      final cleanedPhoto = _cleanBase64Image(photo);
+      final bytes = base64Decode(cleanedPhoto);
+
+      debugPrint(
+        'DEBUG BASE64 OK $name: '
+        'bytesLength=${bytes.length}, '
+        'firstBytes=${bytes.length >= 4 ? bytes.sublist(0, 4).toString() : bytes.toString()}',
+      );
+
+      return ClipOval(
+        child: Image.memory(
+          bytes,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, error, ___) {
+            debugPrint('DEBUG IMAGE MEMORY ERROR $name: $error');
+            return fallbackAvatar();
+          },
+        ),
+      );
+    } catch (e) {
+      debugPrint('Gagal render foto pelamar $name: $e');
+      return fallbackAvatar();
+    }
+  }
+
   String _formatDate(dynamic value) {
     if (value == null) return '-';
 
@@ -192,27 +330,29 @@ class _CompanyGlobalApplicantsPageState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHeader(),
-
           const SizedBox(height: 24),
-
           _buildSearchBox(),
-
           const SizedBox(height: 18),
-
           _buildFilterButtons(),
-
           const SizedBox(height: 24),
-
           Expanded(
-            child: filteredApplicants.isEmpty
-                ? _buildEmptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    itemCount: filteredApplicants.length,
-                    itemBuilder: (context, index) {
-                      return _buildApplicantCard(filteredApplicants[index]);
-                    },
-                  ),
+            child: isEnrichingApplicants
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: navy,
+                    ),
+                  )
+                : filteredApplicants.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        itemCount: filteredApplicants.length,
+                        itemBuilder: (context, index) {
+                          return _buildApplicantCard(
+                            filteredApplicants[index],
+                          );
+                        },
+                      ),
           ),
         ],
       ),
@@ -338,6 +478,7 @@ class _CompanyGlobalApplicantsPageState
         applicant['job_title']?.toString() ?? job['title']?.toString() ?? '-';
     final status = applicant['status']?.toString() ?? 'dikirim';
     final date = _formatDate(applicant['created_at']);
+    final profilePhoto = applicant['profile_photo']?.toString() ?? '';
 
     return GestureDetector(
       onTap: () async {
@@ -358,36 +499,28 @@ class _CompanyGlobalApplicantsPageState
         }
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 18),
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.14),
-              blurRadius: 14,
-              offset: const Offset(0, 7),
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: Row(
-          children: [
-            CircleAvatar(
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+            _buildApplicantAvatar(
+              name: name,
+              profilePhoto: profilePhoto,
               radius: 34,
-              backgroundColor: lightBlue,
-              child: Text(
-                _getInitials(name),
-                style: const TextStyle(
-                  color: navy,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
             ),
-
             const SizedBox(width: 18),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,9 +535,7 @@ class _CompanyGlobalApplicantsPageState
                       color: navy,
                     ),
                   ),
-
                   const SizedBox(height: 6),
-
                   Text(
                     jobTitle,
                     maxLines: 1,
@@ -418,9 +549,7 @@ class _CompanyGlobalApplicantsPageState
                 ],
               ),
             ),
-
             const SizedBox(width: 12),
-
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -432,9 +561,7 @@ class _CompanyGlobalApplicantsPageState
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-
                 const SizedBox(height: 10),
-
                 Container(
                   width: 92,
                   height: 30,
@@ -457,8 +584,9 @@ class _CompanyGlobalApplicantsPageState
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildEmptyState() {
     return ListView(

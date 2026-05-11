@@ -4,6 +4,7 @@ import '../auth/login_view.dart';
 import '../auth/sign_up_view.dart';
 import 'widgets/dot_indicator.dart';
 import 'widgets/onboarding_page_content.dart';
+import '../../services/offline_service.dart';
 
 class OnboardingView extends StatefulWidget {
   const OnboardingView({super.key});
@@ -45,8 +46,10 @@ class _OnboardingViewState extends State<OnboardingView> {
     super.dispose();
   }
 
-  void _onSkip() {
-    Navigator.of(context).push(
+  void _onSkip() async {
+    await OfflineService.setHasSeenOnboarding(true);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const LoginView()),
     );
   }
@@ -114,8 +117,10 @@ class _OnboardingViewState extends State<OnboardingView> {
                   if (isLastPage)
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.of(context).push(
+                        onPressed: () async {
+                          await OfflineService.setHasSeenOnboarding(true);
+                          if (!mounted) return;
+                          Navigator.of(context).pushReplacement(
                             MaterialPageRoute(builder: (_) => const LoginView()),
                           );
                         },
@@ -163,9 +168,11 @@ class _OnboardingViewState extends State<OnboardingView> {
                   if (isLastPage || _currentPage > 0) const SizedBox(width: 16),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         if (isLastPage) {
-                          Navigator.of(context).push(
+                          await OfflineService.setHasSeenOnboarding(true);
+                          if (!mounted) return;
+                          Navigator.of(context).pushReplacement(
                             MaterialPageRoute(builder: (_) => const SignUpView()),
                           );
                         } else {

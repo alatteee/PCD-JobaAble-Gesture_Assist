@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
 import 'company_edit_profile_page.dart';
+import 'dart:convert';
 
 class CompanyProfileDetailPage extends StatefulWidget {
   final Map<String, dynamic> companyData;
@@ -172,6 +173,8 @@ class _CompanyProfileDetailPageState extends State<CompanyProfileDetailPage> {
     required String companyName,
     required String field,
   }) {
+    final String? profilePhoto = companyData['profile_photo'];
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
@@ -191,10 +194,26 @@ class _CompanyProfileDetailPageState extends State<CompanyProfileDetailPage> {
       ),
       child: Column(
         children: [
-          const Icon(
-            Icons.apartment_rounded,
-            color: navy,
-            size: 38,
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: inputFill,
+              shape: BoxShape.circle,
+              image: profilePhoto != null
+                  ? DecorationImage(
+                      image: MemoryImage(base64Decode(profilePhoto)),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
+            ),
+            child: profilePhoto == null
+                ? const Icon(
+                    Icons.apartment_rounded,
+                    color: navy,
+                    size: 38,
+                  )
+                : null,
           ),
 
           const SizedBox(height: 12),
