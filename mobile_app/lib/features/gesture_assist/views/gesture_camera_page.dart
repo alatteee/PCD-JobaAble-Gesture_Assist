@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../providers/camera_provider.dart';
 import '../widgets/camera_preview_widget.dart';
+import '../widgets/hand_overlay_widget.dart';
 
 class GestureCameraPage extends StatefulWidget {
   const GestureCameraPage({super.key});
@@ -77,13 +78,41 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
               // 1. Camera Preview
               CameraPreviewWidget(controller: provider.controller!),
 
-              // 2. UI Overlay (Placeholders)
+              // 2. Hand Landmark Overlay (New)
+              HandOverlayWidget(
+                landmarks: provider.landmarks,
+                gestureLabel: provider.detectedGesture,
+              ),
+
+              // 3. UI Overlay (Placeholders)
               Positioned(
                 bottom: 40,
                 left: 0,
                 right: 0,
                 child: Column(
                   children: [
+                    if (provider.isStreaming)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () => provider.landmarks.isEmpty
+                                  ? provider.showDummyHand()
+                                  : provider.clearDummyHand(),
+                              icon: const Icon(Icons.bug_report),
+                              label: Text(provider.landmarks.isEmpty
+                                  ? "Test Overlay"
+                                  : "Clear Test"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 24,
