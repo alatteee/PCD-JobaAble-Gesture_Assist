@@ -68,13 +68,42 @@ class _GestureHistoryPageState extends State<GestureHistoryPage> {
 
             if (provider.gestureLogs.isEmpty) {
               return Center(
-                child: Text(
-                  'No Gesture History Found',
-                  style: TextStyle(
-                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withOpacity(0.05),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.history_toggle_off_rounded,
+                        size: 64,
+                        color: theme.colorScheme.primary.withOpacity(0.4),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Belum ada riwayat gestur',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary.withOpacity(0.8),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Gunakan fitur Gesture Assist untuk\nmelihat riwayat deteksi di sini.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: theme.textTheme.bodyMedium?.color
+                            ?.withOpacity(0.5),
+                        fontSize: 14,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
                 ),
               );
             }
@@ -117,103 +146,157 @@ class GestureLogCard extends StatelessWidget {
     final theme = Theme.of(context);
     final formattedDate =
         DateFormat('d MMMM yyyy, HH:mm').format(log.timestamp);
-    final confidencePercentage = (log.confidence * 100).toStringAsFixed(0);
+    final confidenceValue = log.confidence;
+    final confidencePercentage = (confidenceValue * 100).toStringAsFixed(0);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color:
             theme.brightness == Brightness.dark ? Colors.black : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: theme.brightness == Brightness.dark
             ? []
             : [
-                const BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 6,
-                  offset: Offset(0, 3),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
               ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () {},
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    _getGestureIcon(log.gestureType),
-                    color: theme.colorScheme.primary,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        log.gestureType,
-                        style: TextStyle(
-                          color: theme.textTheme.titleLarge?.color,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        formattedDate,
-                        style: TextStyle(
-                          color: theme.textTheme.bodyMedium?.color
-                              ?.withOpacity(0.7),
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Icon(Icons.camera_alt_outlined,
-                              size: 14,
-                              color: theme.colorScheme.primary.withOpacity(0.8)),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Camera Context',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.primary.withOpacity(0.8),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            'Confidence: $confidencePercentage%',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.secondary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {},
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.primary,
+                          theme.colorScheme.primary.withOpacity(0.8),
                         ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                    ],
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: theme.colorScheme.primary.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      _getGestureIcon(log.gestureType),
+                      color: Colors.white,
+                      size: 28,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              log.gestureType,
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color:
+                                    theme.colorScheme.secondary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$confidencePercentage%',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: theme.colorScheme.secondary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formattedDate,
+                          style: TextStyle(
+                            color: theme.textTheme.bodyMedium?.color
+                                ?.withOpacity(0.5),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            _buildInfoChip(
+                              context,
+                              Icons.ads_click_rounded,
+                              log.action,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildInfoChip(
+                              context,
+                              Icons.videocam_rounded,
+                              'Video Source',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildInfoChip(BuildContext context, IconData icon, String label) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: theme.colorScheme.primary.withOpacity(0.6)),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: theme.colorScheme.primary.withOpacity(0.7),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
