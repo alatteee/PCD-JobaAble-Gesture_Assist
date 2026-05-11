@@ -12,6 +12,9 @@ import 'dart:io';
 import 'accessibility_settings_view.dart';
 import '../../services/offline_service.dart';
 import '../gesture_assist/views/gesture_history_page.dart';
+import '../gesture_assist/views/gesture_camera_page.dart';
+import '../gesture_assist/providers/camera_provider.dart';
+import 'package:provider/provider.dart';
 
 class ProfileView extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -315,6 +318,22 @@ class _ProfileViewState extends State<ProfileView> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => const GestureHistoryPage(),
+                  ),
+                );
+              },
+            ),
+
+            _buildMenuCard(
+              icon: Icons.camera_alt,
+              label: 'Gesture Detection (Camera)',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ChangeNotifierProvider(
+                      create: (_) => CameraProvider(),
+                      child: const GestureCameraPage(),
+                    ),
                   ),
                 );
               },
