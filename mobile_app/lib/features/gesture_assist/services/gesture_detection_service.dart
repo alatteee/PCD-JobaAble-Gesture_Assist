@@ -4,13 +4,11 @@ import '../models/gesture_result_model.dart';
 import '../models/hand_landmark_model.dart';
 import '../utils/image_preprocessor.dart';
 import '../utils/gesture_cooldown_helper.dart';
-import 'gesture_classifier_service.dart';
 import 'gesture_log_local_service.dart';
 import '../models/gesture_log_model.dart';
 import '../../../services/offline_service.dart';
 
 class GestureDetectionService {
-  final GestureClassifierService _classifier = GestureClassifierService();
   final GestureCooldownHelper _cooldown =
       GestureCooldownHelper(cooldownMs: 1000);
   final GestureLogLocalService _localLogService = GestureLogLocalService();
@@ -24,6 +22,16 @@ class GestureDetectionService {
   /// - thumbs_up
   String _debugGestureType = 'open_palm';
 
+  /// Anti-spam logging.
+  /// Tujuannya agar gesture yang sama tidak disimpan terus-menerus
+  /// selama camera stream aktif.
+  String? _lastLoggedGestureType;
+  DateTime? _lastLoggedAt;
+
+  /// Kalau gesture sama terus, baru boleh disimpan ulang setelah durasi ini.
+  /// Misalnya user tetap open_palm selama lama, history tidak penuh tiap 1 detik.
+  static const int _sameGestureRelogDelayMs = 5000;
+
   String get debugGestureType => _debugGestureType;
 
   void setDebugGestureType(String gestureType) {
@@ -36,31 +44,41 @@ class GestureDetectionService {
     }
   }
 
-  /// Main entry point for the detection pipeline.
-  /// Menerima CameraImage, melakukan preprocess, dan menghasilkan GestureResultModel.
+  /// Main entry point untuk detection pipeline.
+  /// Saat ini masih dummy/debug mode:
+  /// CameraImage -> Preprocessing placeholder -> Dummy Landmark -> Debug Result.
+  ///
+  /// Nanti saat sudah pakai AI asli:
+  /// CameraImage -> Preprocessing -> Real Hand Detection -> Classifier.
   Future<GestureResultModel?> processImage(CameraImage image) async {
     if (_isProcessing) return null;
     _isProcessing = true;
 
     try {
-      // 1. Preprocessing (Resize, Color Convert, Normalization)
-      // Untuk sekarang masih placeholder sebelum TFLite/MediaPipe.
+      // 1. Preprocessing placeholder.
+      // Untuk sekarang belum dipakai, tapi tetap dipanggil agar pipeline PCD sudah siap.
       // ignore: unused_local_variable
       final inputData = await ImagePreprocessor.preprocessCameraImage(image);
 
-      // 2. Inference dummy.
-      // Untuk saat ini, landmark masih mock agar overlay dan classifier bisa dites.
+      // 2. Dummy landmark sesuai tombol debug yang dipilih.
       final mockLandmarks = _generateMockLandmarks(_debugGestureType);
 
-      // 3. Classification
-      final result = _classifier.classify(mockLandmarks);
+      // 3. Debug result.
+      // Untuk mode dummy/testing, hasil gesture dibuat langsung sesuai tombol debug.
+      // Ini mencegah dummy "fist" salah terbaca sebagai open_palm oleh heuristic classifier.
+      final result = _buildDebugGestureResult(
+        gestureType: _debugGestureType,
+        landmarks: mockLandmarks,
+      );
 
-      // 4. Action handling and logging
-      if (result.gestureType != 'none' && _cooldown.canTrigger()) {
+      // 4. Logging ke Hive dengan cooldown + anti-spam.
+      if (result.gestureType != 'none' &&
+          _cooldown.canTrigger() &&
+          _shouldLogGesture(result)) {
         _cooldown.updateLastTrigger();
 
-        // Save to Hive
         await _saveGestureLog(result);
+        _updateLastLoggedGesture(result);
 
         return result;
       }
@@ -72,6 +90,64 @@ class GestureDetectionService {
     } finally {
       _isProcessing = false;
     }
+  }
+
+  GestureResultModel _buildDebugGestureResult({
+    required String gestureType,
+    required List<HandLandmark> landmarks,
+  }) {
+    switch (gestureType) {
+      case 'fist':
+        return GestureResultModel(
+          gestureType: 'fist',
+          action: 'back',
+          confidence: 0.85,
+          landmarks: landmarks,
+          timestamp: DateTime.now(),
+        );
+
+      case 'thumbs_up':
+        return GestureResultModel(
+          gestureType: 'thumbs_up',
+          action: 'confirm',
+          confidence: 0.95,
+          landmarks: landmarks,
+          timestamp: DateTime.now(),
+        );
+
+      case 'open_palm':
+      default:
+        return GestureResultModel(
+          gestureType: 'open_palm',
+          action: 'next',
+          confidence: 0.9,
+          landmarks: landmarks,
+          timestamp: DateTime.now(),
+        );
+    }
+  }
+
+  bool _shouldLogGesture(GestureResultModel result) {
+    final now = DateTime.now();
+
+    // Gesture pertama selalu disimpan.
+    if (_lastLoggedGestureType == null || _lastLoggedAt == null) {
+      return true;
+    }
+
+    // Kalau gesture berubah, langsung simpan.
+    if (_lastLoggedGestureType != result.gestureType) {
+      return true;
+    }
+
+    // Kalau gesture sama, simpan ulang hanya setelah jeda tertentu.
+    final elapsedMs = now.difference(_lastLoggedAt!).inMilliseconds;
+    return elapsedMs >= _sameGestureRelogDelayMs;
+  }
+
+  void _updateLastLoggedGesture(GestureResultModel result) {
+    _lastLoggedGestureType = result.gestureType;
+    _lastLoggedAt = DateTime.now();
   }
 
   Future<void> _saveGestureLog(GestureResultModel result) async {
@@ -91,7 +167,8 @@ class GestureDetectionService {
     await _localLogService.saveGestureLog(log);
   }
 
-  /// Placeholder for actual landmark detection output.
+  /// Placeholder untuk output landmark detection asli.
+  /// Untuk sekarang masih dummy agar overlay, logging, dan history bisa dites.
   List<HandLandmark> _generateMockLandmarks(String gestureType) {
     switch (gestureType) {
       case 'fist':
@@ -152,8 +229,8 @@ class GestureDetectionService {
   }
 
   /// 21 titik dummy untuk fist.
-  /// Dibuat lebih menyebar agar titik dan garis tetap terlihat jelas di overlay,
-  /// tetapi ujung jari tetap berada dekat area telapak sehingga terbaca sebagai fist.
+  /// Dibuat menyebar agar terlihat jelas di overlay,
+  /// tetapi bentuknya tetap menunjukkan jari-jari terlipat.
   List<HandLandmark> _mockFist() {
     return [
       _point(0.50, 0.82), // 0 wrist
