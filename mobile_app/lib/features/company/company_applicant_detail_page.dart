@@ -99,6 +99,24 @@ class _CompanyApplicantDetailPageState
 
   String _stringValue(dynamic value) => value?.toString() ?? '';
 
+  String _cleanBase64Image(String value) {
+    var cleaned = value.trim();
+
+    if (cleaned.contains(',')) {
+      cleaned = cleaned.split(',').last;
+    }
+
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), '');
+
+    return cleaned;
+  }
+
+  bool _isLikelyLocalFilePath(String value) {
+    return value.startsWith('/data/') ||
+        value.startsWith('/storage/') ||
+        value.startsWith('/sdcard/');
+  }
+
   String _getInitials(String name) {
     final cleanName = name.trim();
 
@@ -218,14 +236,6 @@ class _CompanyApplicantDetailPageState
     }
   }
 
-  bool _isAccepted(String status) {
-    return _normalizeStatus(status) == 'diterima';
-  }
-
-  bool _isRejected(String status) {
-    return _normalizeStatus(status) == 'ditolak';
-  }
-
   List<String> _toStringList(dynamic value) {
     if (value == null) return [];
 
@@ -262,52 +272,12 @@ class _CompanyApplicantDetailPageState
     Map<String, dynamic>? extraData,
   }) async {
     final applicationId = MongoService.getMongoId(widget.applicant['_id']);
-    final userId = widget.applicant['user_id'];
-    final jobTitle = widget.applicant['job_title'] ?? 'Posisi Terkait';
-    final companyName = widget.applicant['company_name'] ?? 'Perusahaan Terkait';
 
     final success = await MongoService.updateApplicationStatus(
       applicationId: applicationId,
       status: status,
       extraData: extraData,
     );
-
-    if (success && userId != null) {
-      // Trigger notification to job seeker
-      String title = 'Pembaruan Lamaran';
-      String message = 'Lamaran Anda di $companyName untuk posisi $jobTitle sedang diperbarui.';
-      String type = 'application_status';
-
-      final normalized = _normalizeStatus(status);
-      if (normalized == 'ditinjau') {
-        title = 'Lamaran Ditinjau';
-        message = 'Lamaran Anda untuk posisi $jobTitle sedang ditinjau oleh $companyName.';
-      } else if (normalized == 'wawancara') {
-        title = 'Panggilan Wawancara';
-        message = 'Selamat! Anda dipanggil wawancara untuk posisi $jobTitle di $companyName.';
-        type = 'interview_call';
-      } else if (normalized == 'diterima') {
-        title = 'Lamaran Diterima';
-        message = 'Selamat! Anda diterima bekerja untuk posisi $jobTitle di $companyName.';
-        type = 'application_accepted';
-      } else if (normalized == 'ditolak') {
-        title = 'Pembaruan Lamaran';
-        message = 'Terima kasih telah melamar. Mohon maaf, lamaran Anda belum dapat dilanjutkan oleh $companyName.';
-        type = 'application_rejected';
-      }
-
-      await MongoService.createNotification(
-        receiverId: userId,
-        receiverRole: 'job_seeker',
-        senderId: widget.applicant['company_id'] ?? '',
-        senderRole: 'company',
-        applicationId: applicationId,
-        jobId: widget.applicant['job_id'] ?? '',
-        title: title,
-        message: message,
-        type: type,
-      );
-    }
 
     if (!context.mounted) return;
 
@@ -416,9 +386,7 @@ class _CompanyApplicantDetailPageState
           padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
           children: [
             _buildHeader(context),
-
             const SizedBox(height: 24),
-
             _buildProfileCard(
               name: name,
               email: email,
@@ -428,33 +396,23 @@ class _CompanyApplicantDetailPageState
               status: status,
               createdAt: createdAt,
             ),
-
             const SizedBox(height: 18),
-
             _buildStatusTimelineCard(
               status: status,
               sentDate: sentDate,
             ),
-
             const SizedBox(height: 18),
-
             _buildAboutCard(
               name: name,
               birthDate: birthDate,
               gender: gender,
               disability: disability,
             ),
-
             const SizedBox(height: 18),
-
             _buildSkillsCard(skills),
-
             const SizedBox(height: 18),
-
             _buildCvDigitalCard(),
-
             const SizedBox(height: 24),
-
             _buildActionButtons(status),
           ],
         ),
@@ -530,9 +488,7 @@ class _CompanyApplicantDetailPageState
                     _statusBadge(status),
                   ],
                 ),
-
                 const SizedBox(height: 6),
-
                 RichText(
                   text: TextSpan(
                     children: [
@@ -555,9 +511,7 @@ class _CompanyApplicantDetailPageState
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 14),
-
                 _smallInfo(Icons.email_rounded, email),
                 const SizedBox(height: 8),
                 _smallInfo(Icons.phone_rounded, phone),
@@ -579,32 +533,91 @@ class _CompanyApplicantDetailPageState
   Widget _buildProfileAvatar(String name) {
     final profilePhoto = _stringValue(userDetails?['profile_photo']);
 
-    if (profilePhoto.isNotEmpty) {
-      try {
-        final ImageProvider<Object> imageProvider = profilePhoto.startsWith('/')
-            ? FileImage(File(profilePhoto)) as ImageProvider<Object>
-            : MemoryImage(base64Decode(profilePhoto)) as ImageProvider<Object>;
-
-        return CircleAvatar(
-          radius: 34,
-          backgroundColor: lightBlue,
-          backgroundImage: imageProvider,
-        );
-      } catch (_) {}
+    Widget fallbackAvatar() {
+      return CircleAvatar(
+        radius: 34,
+        backgroundColor: lightBlue,
+        child: Text(
+          _getInitials(name),
+          style: const TextStyle(
+            color: navy,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
     }
 
-    return CircleAvatar(
-      radius: 34,
-      backgroundColor: lightBlue,
-      child: Text(
-        _getInitials(name),
-        style: const TextStyle(
-          color: navy,
-          fontSize: 22,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
+    debugPrint(
+      'DEBUG FOTO DETAIL $name: '
+      'isEmpty=${profilePhoto.isEmpty}, '
+      'length=${profilePhoto.length}, '
+      'prefix=${profilePhoto.length > 40 ? profilePhoto.substring(0, 40) : profilePhoto}',
     );
+
+    final photo = profilePhoto.trim();
+
+    if (photo.isEmpty) {
+      return fallbackAvatar();
+    }
+
+    try {
+      if (photo.startsWith('http')) {
+        return ClipOval(
+          child: Image.network(
+            photo,
+            width: 68,
+            height: 68,
+            fit: BoxFit.cover,
+            errorBuilder: (_, error, ___) {
+              debugPrint('DEBUG IMAGE NETWORK ERROR DETAIL $name: $error');
+              return fallbackAvatar();
+            },
+          ),
+        );
+      }
+
+      if (_isLikelyLocalFilePath(photo)) {
+        return ClipOval(
+          child: Image.file(
+            File(photo),
+            width: 68,
+            height: 68,
+            fit: BoxFit.cover,
+            errorBuilder: (_, error, ___) {
+              debugPrint('DEBUG IMAGE FILE ERROR DETAIL $name: $error');
+              return fallbackAvatar();
+            },
+          ),
+        );
+      }
+
+      final cleanedPhoto = _cleanBase64Image(photo);
+      final bytes = base64Decode(cleanedPhoto);
+
+      debugPrint(
+        'DEBUG BASE64 OK DETAIL $name: '
+        'bytesLength=${bytes.length}, '
+        'firstBytes=${bytes.length >= 4 ? bytes.sublist(0, 4).toString() : bytes.toString()}',
+      );
+
+      return ClipOval(
+        child: Image.memory(
+          bytes,
+          width: 68,
+          height: 68,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, error, ___) {
+            debugPrint('DEBUG IMAGE MEMORY ERROR DETAIL $name: $error');
+            return fallbackAvatar();
+          },
+        ),
+      );
+    } catch (e) {
+      debugPrint('Gagal render foto detail pelamar $name: $e');
+      return fallbackAvatar();
+    }
   }
 
   Widget _buildStatusTimelineCard({
@@ -656,24 +669,24 @@ class _CompanyApplicantDetailPageState
       },
     ];
 
-  if (normalized == 'diterima') {
-    timelineItems.add({
-      'key': 'diterima',
-      'title': 'Diterima',
-      'date': widget.applicant['accepted_at'] != null
-          ? _formatDateShort(widget.applicant['accepted_at'])
-          : widget.applicant['accepted_status_updated_at'] != null
-              ? _formatDateShort(widget.applicant['accepted_status_updated_at'])
-              : normalized == 'diterima' && widget.applicant['updated_at'] != null
-                  ? _formatDateShort(widget.applicant['updated_at'])
-                  : '-',
-      'description': _stringValue(widget.applicant['accepted_message']).isNotEmpty
-          ? _stringValue(widget.applicant['accepted_message'])
-          : 'Pelamar diterima untuk posisi ini.',
-      'active': true,
-      'done': true,
-      'color': greenText,
-    });
+    if (normalized == 'diterima') {
+      timelineItems.add({
+        'key': 'diterima',
+        'title': 'Diterima',
+        'date': widget.applicant['accepted_at'] != null
+            ? _formatDateShort(widget.applicant['accepted_at'])
+            : widget.applicant['accepted_status_updated_at'] != null
+                ? _formatDateShort(widget.applicant['accepted_status_updated_at'])
+                : normalized == 'diterima' && widget.applicant['updated_at'] != null
+                    ? _formatDateShort(widget.applicant['updated_at'])
+                    : '-',
+        'description': _stringValue(widget.applicant['accepted_message']).isNotEmpty
+            ? _stringValue(widget.applicant['accepted_message'])
+            : 'Pelamar diterima untuk posisi ini.',
+        'active': true,
+        'done': true,
+        'color': greenText,
+      });
     } else if (normalized == 'ditolak') {
       timelineItems.add({
         'key': 'ditolak',
@@ -681,8 +694,7 @@ class _CompanyApplicantDetailPageState
         'date': widget.applicant['rejected_at'] != null
             ? _formatDateShort(widget.applicant['rejected_at'])
             : '-',
-        'description': _stringValue(widget.applicant['rejection_reason'])
-                .isNotEmpty
+        'description': _stringValue(widget.applicant['rejection_reason']).isNotEmpty
             ? _stringValue(widget.applicant['rejection_reason'])
             : 'Lamaran belum dapat dilanjutkan.',
         'active': true,
@@ -705,9 +717,7 @@ class _CompanyApplicantDetailPageState
               color: navy,
             ),
           ),
-
           const SizedBox(height: 18),
-
           Column(
             children: List.generate(timelineItems.length, (index) {
               final item = timelineItems[index];
@@ -777,9 +787,7 @@ class _CompanyApplicantDetailPageState
                 ),
             ],
           ),
-
           const SizedBox(width: 14),
-
           Expanded(
             child: Container(
               margin: EdgeInsets.only(bottom: isLast ? 0 : 18),
@@ -943,9 +951,7 @@ class _CompanyApplicantDetailPageState
                 size: 28,
               ),
             ),
-
             const SizedBox(width: 16),
-
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -971,9 +977,7 @@ class _CompanyApplicantDetailPageState
                 ],
               ),
             ),
-
             const SizedBox(width: 8),
-
             SizedBox(
               height: 36,
               child: ElevatedButton(
@@ -1116,13 +1120,14 @@ class _CompanyApplicantDetailPageState
   }
 
   void _showInterviewDialog() {
+    final pageContext = context;
     final noteController = TextEditingController();
 
     DateTime? selectedDate;
     TimeOfDay? selectedTime;
 
     showDialog(
-      context: context,
+      context: pageContext,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -1259,11 +1264,9 @@ class _CompanyApplicantDetailPageState
                         ),
                       ),
                       const SizedBox(height: 20),
-
-                      // Pilih tanggal
-                      Align(
+                      const Align(
                         alignment: Alignment.centerLeft,
-                        child: const Text(
+                        child: Text(
                           'Tanggal Wawancara',
                           style: TextStyle(
                             fontSize: 13,
@@ -1309,13 +1312,10 @@ class _CompanyApplicantDetailPageState
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 14),
-
-                      // Pilih jam
-                      Align(
+                      const Align(
                         alignment: Alignment.centerLeft,
-                        child: const Text(
+                        child: Text(
                           'Jam Wawancara',
                           style: TextStyle(
                             fontSize: 13,
@@ -1361,18 +1361,14 @@ class _CompanyApplicantDetailPageState
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 14),
-
                       _dialogInput(
                         controller: noteController,
                         label: 'Catatan Wawancara',
                         hint: 'Contoh: Wawancara melalui Google Meet',
                         maxLines: 3,
                       ),
-
                       const SizedBox(height: 20),
-
                       _dialogButtons(
                         cancelText: 'Batal',
                         actionText: 'Simpan',
@@ -1380,7 +1376,7 @@ class _CompanyApplicantDetailPageState
                         onCancel: () => Navigator.pop(dialogContext),
                         onAction: () {
                           if (selectedDate == null || selectedTime == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            ScaffoldMessenger.of(pageContext).showSnackBar(
                               const SnackBar(
                                 content: Text(
                                   'Tanggal dan jam wawancara wajib dipilih',
@@ -1401,12 +1397,12 @@ class _CompanyApplicantDetailPageState
                           Navigator.pop(dialogContext);
 
                           _updateApplicantStatus(
-                            context: context,
+                            context: pageContext,
                             status: 'wawancara',
                             extraData: {
-                              'interview_date': interviewDateTime.toIso8601String(),
-                              'interview_display':
-                                  combinedDateTime(), // opsional, buat display
+                              'interview_date':
+                                  interviewDateTime.toIso8601String(),
+                              'interview_display': combinedDateTime(),
                               'interview_note': noteController.text.trim(),
                             },
                           );
@@ -1449,9 +1445,7 @@ class _CompanyApplicantDetailPageState
                     color: greenText,
                     size: 56,
                   ),
-
                   const SizedBox(height: 14),
-
                   const Text(
                     'Terima Pelamar',
                     style: TextStyle(
@@ -1460,35 +1454,27 @@ class _CompanyApplicantDetailPageState
                       color: navy,
                     ),
                   ),
-
                   const SizedBox(height: 18),
-
                   _dialogInput(
                     controller: messageController,
                     label: 'Pesan untuk Pelamar',
                     hint: 'Contoh: Selamat, Anda diterima untuk posisi ini.',
                     maxLines: 3,
                   ),
-
                   const SizedBox(height: 12),
-
                   _dialogInput(
                     controller: startDateController,
                     label: 'Tanggal Mulai Kerja',
                     hint: 'Contoh: 20 Mei 2026',
                   ),
-
                   const SizedBox(height: 12),
-
                   _dialogInput(
                     controller: workInfoController,
                     label: 'Informasi Tambahan',
                     hint: 'Contoh: Gunakan kemeja putih dan celana hitam.',
                     maxLines: 3,
                   ),
-
                   const SizedBox(height: 20),
-
                   _dialogButtons(
                     cancelText: 'Batal',
                     actionText: 'Terima',
@@ -1553,9 +1539,7 @@ class _CompanyApplicantDetailPageState
                   color: redText,
                   size: 56,
                 ),
-
                 const SizedBox(height: 14),
-
                 const Text(
                   'Tolak Pelamar',
                   style: TextStyle(
@@ -1564,9 +1548,7 @@ class _CompanyApplicantDetailPageState
                     color: navy,
                   ),
                 ),
-
                 const SizedBox(height: 18),
-
                 _dialogInput(
                   controller: reasonController,
                   label: 'Alasan Penolakan',
@@ -1574,9 +1556,7 @@ class _CompanyApplicantDetailPageState
                       'Contoh: Kualifikasi belum sesuai dengan kebutuhan posisi.',
                   maxLines: 4,
                 ),
-
                 const SizedBox(height: 20),
-
                 _dialogButtons(
                   cancelText: 'Batal',
                   actionText: 'Tolak',
@@ -1628,9 +1608,7 @@ class _CompanyApplicantDetailPageState
             color: navy,
           ),
         ),
-
         const SizedBox(height: 7),
-
         TextField(
           controller: controller,
           maxLines: maxLines,
@@ -1694,9 +1672,7 @@ class _CompanyApplicantDetailPageState
             ),
           ),
         ),
-
         const SizedBox(width: 12),
-
         Expanded(
           child: SizedBox(
             height: 44,

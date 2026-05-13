@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 
 class CompanyEditProfilePage extends StatefulWidget {
   final Map<String, dynamic> companyData;
@@ -23,6 +25,7 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
   late final TextEditingController _addressController;
   late final TextEditingController _descriptionController;
 
+  String? _profilePhotoBase64;
   bool isSaving = false;
 
   static const Color navy = Color(0xFF0B1B55);
@@ -57,6 +60,8 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
     _descriptionController = TextEditingController(
       text: widget.companyData['description']?.toString() ?? '',
     );
+
+    _profilePhotoBase64 = widget.companyData['profile_photo']?.toString();
   }
 
   @override
@@ -68,6 +73,29 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
     _addressController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+
+      if (pickedFile == null) return;
+
+      final bytes = await pickedFile.readAsBytes();
+      final base64String = base64Encode(bytes);
+
+      setState(() {
+        _profilePhotoBase64 = base64String;
+      });
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Gagal memilih foto: $e');
+      }
+    }
   }
 
   Future<void> _saveProfile() async {
@@ -93,6 +121,7 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
         'phone': _phoneController.text.trim(),
         'address': _addressController.text.trim(),
         'description': _descriptionController.text.trim(),
+        'profile_photo': _profilePhotoBase64,
       },
     );
 
@@ -266,6 +295,10 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
                     key: _formKey,
                     child: Column(
                       children: [
+                        _buildPhotoPicker(),
+
+                        const SizedBox(height: 24),
+
                         _buildInputGroup(
                           label: 'Nama Perusahaan',
                           controller: _companyNameController,
@@ -393,6 +426,56 @@ class _CompanyEditProfilePageState extends State<CompanyEditProfilePage> {
                 fontSize: 23,
                 fontWeight: FontWeight.w900,
                 color: navy,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhotoPicker() {
+    return Center(
+      child: Stack(
+        children: [
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              color: inputFill,
+              shape: BoxShape.circle,
+              border: Border.all(color: navy.withOpacity(0.1), width: 2),
+              image: _profilePhotoBase64 != null
+                  ? DecorationImage(
+                      image: MemoryImage(base64Decode(_profilePhotoBase64!)),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
+            ),
+            child: _profilePhotoBase64 == null
+                ? const Icon(
+                    Icons.apartment_rounded,
+                    color: navy,
+                    size: 50,
+                  )
+                : null,
+          ),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: GestureDetector(
+              onTap: _pickImage,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: navy,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.camera_alt,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
             ),
           ),

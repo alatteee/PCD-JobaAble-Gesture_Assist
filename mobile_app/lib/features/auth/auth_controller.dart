@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../../services/mongo_service.dart';
+import '../../services/offline_service.dart';
 
 class AuthController {
   
@@ -99,6 +100,9 @@ class AuthController {
         'email': email,
         'password_hash': passwordHash,
       });
+      if (user != null) {
+        await OfflineService.setLoggedInUser(user);
+      }
       return user; // Return map data user jika ada, null jika salah
     } catch (e) {
       return null;

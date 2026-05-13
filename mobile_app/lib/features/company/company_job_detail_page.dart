@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'company_edit_job_page.dart';
 import 'company_job_applicants_page.dart';
 import '../../services/mongo_service.dart';
+import 'dart:convert';
 
 class CompanyJobDetailPage extends StatelessWidget {
   final Map<String, dynamic> job;
@@ -364,6 +365,8 @@ class CompanyJobDetailPage extends StatelessWidget {
     required String jobType,
     required String status,
   }) {
+    final String? jobPhoto = job['job_photo'];
+
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
       decoration: _cardDecoration(),
@@ -378,12 +381,20 @@ class CompanyJobDetailPage extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: lightGrey,
                   borderRadius: BorderRadius.circular(12),
+                  image: jobPhoto != null
+                      ? DecorationImage(
+                          image: MemoryImage(base64Decode(jobPhoto)),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
                 ),
-                child: Icon(
-                  _getJobIcon(title),
-                  size: 38,
-                  color: navy,
-                ),
+                child: jobPhoto == null
+                    ? Icon(
+                        _getJobIcon(title),
+                        size: 38,
+                        color: navy,
+                      )
+                    : null,
               ),
               const SizedBox(width: 14),
               Expanded(

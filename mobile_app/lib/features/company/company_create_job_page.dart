@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 
 class CompanyCreateJobPage extends StatefulWidget {
   final String companyId;
@@ -27,6 +29,7 @@ class _CompanyCreateJobPageState extends State<CompanyCreateJobPage> {
   String? _selectedJobType;
   bool _openForDisability = true;
   bool _isLoading = false;
+  String? _jobPhotoBase64;
 
   final List<String> _facilities = [];
 
@@ -41,6 +44,29 @@ class _CompanyCreateJobPageState extends State<CompanyCreateJobPage> {
     _descriptionController.dispose();
     _qualificationController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+
+      if (pickedFile == null) return;
+
+      final bytes = await pickedFile.readAsBytes();
+      final base64String = base64Encode(bytes);
+
+      setState(() {
+        _jobPhotoBase64 = base64String;
+      });
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Gagal memilih gambar: $e');
+      }
+    }
   }
 
   Future<void> _publishJob() async {
@@ -68,6 +94,7 @@ class _CompanyCreateJobPageState extends State<CompanyCreateJobPage> {
         'facilities': _facilities,
         'is_disability_friendly': _openForDisability,
         'open_for_disability': _openForDisability,
+        'job_photo': _jobPhotoBase64,
         'status': 'active',
         'applicant_count': 0,
         'created_at': now,
@@ -305,6 +332,55 @@ class _CompanyCreateJobPageState extends State<CompanyCreateJobPage> {
     );
   }
 
+  Widget _buildJobPhotoPicker() {
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Container(
+        width: double.infinity,
+        height: 140,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade300),
+          image: _jobPhotoBase64 != null
+              ? DecorationImage(
+                  image: MemoryImage(base64Decode(_jobPhotoBase64!)),
+                  fit: BoxFit.cover,
+                )
+              : null,
+        ),
+        child: _jobPhotoBase64 == null
+            ? const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_photo_alternate_outlined, color: navy, size: 42),
+                  SizedBox(height: 8),
+                  Text(
+                    'Tambah Foto Lowongan',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: navy,
+                    ),
+                  ),
+                ],
+              )
+            : Align(
+                alignment: Alignment.topRight,
+                child: Container(
+                  margin: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit, color: Colors.white, size: 16),
+                ),
+              ),
+      ),
+    );
+  }
+
   Widget _textField({
     required TextEditingController controller,
     required String hint,
@@ -362,6 +438,10 @@ class _CompanyCreateJobPageState extends State<CompanyCreateJobPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
+
+                _label('Foto Lowongan', subtitle: 'Pilih gambar yang merepresentasikan pekerjaan.'),
+                _buildJobPhotoPicker(),
+                const SizedBox(height: 18),
 
                 _label('Nama Pekerjaan'),
                 _textField(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
 import 'application_success_page.dart';
@@ -176,6 +177,7 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         'phone': _phone,
         'message': message,
         'status': 'pending',
+        'job_photo': widget.job['job_photo'], // Tambahkan ini agar foto tersimpan di koleksi lamaran
         'sync_status': 'synced',
         'created_at': DateTime.now().toUtc(),
       },
@@ -249,6 +251,7 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
                       company: _companyName,
                       location: _location,
                       jobType: _jobType,
+                      jobPhoto: widget.job['job_photo'], // Tambahkan ini
                     ),
                     const SizedBox(height: 22),
                     Text(
@@ -391,12 +394,14 @@ class _JobSummaryCard extends StatelessWidget {
   final String company;
   final String location;
   final String jobType;
+  final String? jobPhoto; // Tambahkan ini
 
   const _JobSummaryCard({
     required this.title,
     required this.company,
     required this.location,
     required this.jobType,
+    this.jobPhoto, // Tambahkan ini
   });
 
   @override
@@ -420,12 +425,20 @@ class _JobSummaryCard extends StatelessWidget {
               color: isDark ? Colors.black : Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: isDark ? Border.all(color: Colors.yellow) : null,
+              image: jobPhoto != null
+                  ? DecorationImage(
+                      image: MemoryImage(base64Decode(jobPhoto!)),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            child: Icon(
-              Icons.headset_mic,
-              color: theme.colorScheme.primary,
-              size: 40,
-            ),
+            child: jobPhoto == null
+                ? Icon(
+                    Icons.business_center_rounded, // Ganti agar lebih relevan
+                    color: theme.colorScheme.primary,
+                    size: 40,
+                  )
+                : null,
           ),
           const SizedBox(width: 14),
           Expanded(
