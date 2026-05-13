@@ -2,16 +2,20 @@ import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import '../services/camera_service.dart';
 import '../models/hand_landmark_model.dart';
+import '../services/gesture_detection_service.dart';
 
 class CameraProvider extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
+  final GestureDetectionService _detectionService = GestureDetectionService();
+
   bool _isInitialized = false;
   bool _isLoading = false;
   String? _errorMessage;
 
-  // New: Hand Detection UI states
+  // Detection UI states
   List<HandLandmark> _landmarks = [];
   String? _detectedGesture;
+  String? _lastAction;
 
   bool get isInitialized => _isInitialized;
   bool get isLoading => _isLoading;
@@ -21,6 +25,7 @@ class CameraProvider extends ChangeNotifier {
 
   List<HandLandmark> get landmarks => _landmarks;
   String? get detectedGesture => _detectedGesture;
+  String? get lastAction => _lastAction;
 
   // For testing UI: Generates dummy hand points
   void showDummyHand() {
@@ -41,6 +46,18 @@ class CameraProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Integrasi dengan Detection Pipeline
+  Future<void> _onImageStream(CameraImage image) async {
+    final result = await _detectionService.processImage(image);
+    
+    if (result != null) {
+      _landmarks = result.landmarks;
+      _detectedGesture = result.gestureType;
+      _lastAction = result.action;
+      notifyListeners();
+    }
+  }
+
   Future<void> initializeCamera() async {
     _isLoading = true;
     _errorMessage = null;
@@ -57,11 +74,11 @@ class CameraProvider extends ChangeNotifier {
     }
   }
 
-  void toggleStream(Function(CameraImage) onImage) {
+  void toggleStream() {
     if (_cameraService.isStreaming) {
       _cameraService.stopImageStream();
     } else {
-      _cameraService.startImageStream(onImage);
+      _cameraService.startImageStream(_onImageStream);
     }
     notifyListeners();
   }

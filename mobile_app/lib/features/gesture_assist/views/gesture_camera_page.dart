@@ -140,12 +140,7 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
                           backgroundColor: provider.isStreaming
                               ? Colors.red
                               : AppColors.primaryNavy,
-                          onPressed: () {
-                            provider.toggleStream((image) {
-                              // Forward to ML Service in the future
-                              debugPrint("Received frame: ${image.width}x${image.height}");
-                            });
-                          },
+                          onPressed: () => provider.toggleStream(),
                           child: Icon(
                             provider.isStreaming ? Icons.stop : Icons.play_arrow,
                             color: Colors.white,
