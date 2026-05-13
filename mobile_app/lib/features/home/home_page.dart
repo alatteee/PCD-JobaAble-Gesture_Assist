@@ -2,10 +2,12 @@
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
+import '../../services/offline_service.dart';
 import '../job_detail/job_detail_page.dart';
 import '../applications/applications_page.dart';
 import '../profile/profile_view.dart';
 import '../profile/accessibility_settings_view.dart';
+import '../profile/profile_controller.dart';
 
 import '../notifications/notification_page.dart';
 import '../cv/cv_view.dart';
@@ -34,7 +36,10 @@ class _HomePageState extends State<HomePage> {
   Set<String> savedJobIds = {};
 
   bool isLoading = true;
+  bool isLoadingProfileName = true;
   bool _isOpeningNotificationPage = false;
+
+  String? namaLengkap;
 
   String selectedCategory = 'Semua';
   String searchQuery = '';
@@ -53,6 +58,7 @@ class _HomePageState extends State<HomePage> {
       });
     }
 
+    fetchProfileName();
     fetchJobs();
   }
 
@@ -68,6 +74,56 @@ class _HomePageState extends State<HomePage> {
         widget.userData['user_id']?.toString() ??
         widget.userData['email']?.toString() ??
         '';
+  }
+
+  String? _textOrNull(dynamic value) {
+    final text = value?.toString().trim();
+
+    if (text == null || text.isEmpty) return null;
+
+    return text;
+  }
+
+  String _getDisplayName() {
+    return _textOrNull(namaLengkap) ??
+        _textOrNull(widget.userData['nama_lengkap']) ??
+        _textOrNull(widget.userData['full_name']) ??
+        _textOrNull(widget.userData['username']) ??
+        'User';
+  }
+
+  Future<void> fetchProfileName() async {
+    final userId = widget.userData['_id'] ??
+        widget.userData['id'] ??
+        widget.userData['user_id'];
+
+    if (userId == null) {
+      if (!mounted) return;
+
+      setState(() {
+        isLoadingProfileName = false;
+      });
+
+      return;
+    }
+
+    try {
+      final profile = await ProfileController.getProfileByUserId(userId);
+
+      if (!mounted) return;
+
+      setState(() {
+        namaLengkap = _textOrNull(profile?['nama_lengkap']) ??
+            _textOrNull(profile?['full_name']);
+        isLoadingProfileName = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        isLoadingProfileName = false;
+      });
+    }
   }
 
   String _jobIdOf(Map<String, dynamic> job) {
@@ -97,48 +153,36 @@ class _HomePageState extends State<HomePage> {
     applyFilters();
   }
 
-  void _showCustomSnackBar({
-    required String message,
-    required IconData icon,
-    Color backgroundColor = AppColors.primaryNavy,
-  }) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: backgroundColor,
-        elevation: 8,
-        duration: const Duration(seconds: 2),
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
-        content: Row(
-          children: [
-            Icon(
-              icon,
-              color: Colors.white,
-              size: 22,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// Force refresh jobs dari MongoDB (clear cache dan fetch fresh)
+  Future<void> forceFreshFetch() async {
+    if (mounted) {
+      setState(() {
+        isLoading = true;
+      });
+    }
+
+    // DEBUG: Check cache sebelum dihapus
+    print('🔍 DEBUG: Checking cache before clear...');
+    OfflineService.debugCachedJobsCount();
+
+    // Hapus cache lama
+    print('🗑️ Clearing cache to force fresh fetch from MongoDB...');
+    await OfflineService.clearJobsCache();
+
+    // Fetch ulang dari MongoDB
+    await fetchJobs();
+
+    if (mounted) {
+      _showCustomSnackBar(
+        message: 'Data diperbarui dari server',
+        icon: Icons.refresh,
+        backgroundColor: Colors.grey.shade800,
+        isHighContrast: AccessibilityController.highContrastNotifier.value,
+      );
+    }
   }
 
-  Future<void> toggleSaveJob(Map<String, dynamic> job) async {
+  Future<void> toggleSaveJob(Map<String, dynamic> job, bool isHighContrast) async {
     final jobId = _jobIdOf(job);
 
     if (_currentUserId.isEmpty || jobId.isEmpty) {
@@ -146,6 +190,7 @@ class _HomePageState extends State<HomePage> {
         message: 'Data pengguna atau lowongan tidak valid',
         icon: Icons.error_outline,
         backgroundColor: Colors.grey.shade800,
+        isHighContrast: isHighContrast,
       );
       return;
     }
@@ -180,6 +225,7 @@ class _HomePageState extends State<HomePage> {
         icon: alreadySaved ? Icons.bookmark_border : Icons.bookmark,
         backgroundColor:
             alreadySaved ? Colors.grey.shade800 : AppColors.primaryNavy,
+        isHighContrast: isHighContrast,
       );
     } else {
       _showCustomSnackBar(
@@ -188,8 +234,46 @@ class _HomePageState extends State<HomePage> {
             : 'Gagal menyimpan lowongan',
         icon: Icons.error_outline,
         backgroundColor: Colors.grey.shade800,
+        isHighContrast: isHighContrast,
       );
     }
+  }
+
+  void _showCustomSnackBar({
+    required String message,
+    required IconData icon,
+    required Color backgroundColor,
+    required bool isHighContrast,
+  }) {
+    final snackBar = SnackBar(
+      content: Row(
+        children: [
+          Icon(icon, color: isHighContrast ? AccessibilityTheme.black : Colors.white),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: isHighContrast ? AccessibilityTheme.black : Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: isHighContrast ? AccessibilityTheme.yellow : backgroundColor,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      margin: const EdgeInsets.all(16),
+      elevation: 4,
+      duration: const Duration(seconds: 2),
+    );
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(snackBar);
   }
 
   void applyFilters() {
@@ -232,7 +316,7 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent, // Make it transparent
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(40),
@@ -240,75 +324,92 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
       builder: (BuildContext ctx) {
-        return Container(
-          height: 440,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 24.0,
-            vertical: 32.0,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const SizedBox(height: 24),
-              TweenAnimationBuilder<double>(
-                tween: Tween<double>(
-                  begin: 0.0,
-                  end: 1.0,
-                ),
-                duration: const Duration(milliseconds: 700),
-                curve: Curves.elasticOut,
-                builder: (context, scale, child) {
-                  return Transform.scale(
-                    scale: scale,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.green.withOpacity(0.1),
-                      ),
-                      padding: const EdgeInsets.all(20),
-                      child: const Icon(
-                        Icons.check_circle_rounded,
-                        color: Colors.green,
-                        size: 110,
-                      ),
-                    ),
-                  );
-                },
+        return ValueListenableBuilder<bool>(
+          valueListenable: AccessibilityController.highContrastNotifier,
+          builder: (context, isHighContrast, _) {
+            final bgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+            final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonBgColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+
+            return Container(
+              height: 440,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24.0,
+                vertical: 32.0,
               ),
-              const SizedBox(height: 32),
-              const Text(
-                'Login Berhasil !',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primaryNavy,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(40),
+                  topRight: Radius.circular(40),
                 ),
               ),
-              const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryNavy,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 24),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(
+                      begin: 0.0,
+                      end: 1.0,
                     ),
+                    duration: const Duration(milliseconds: 700),
+                    curve: Curves.elasticOut,
+                    builder: (context, scale, child) {
+                      return Transform.scale(
+                        scale: scale,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isHighContrast ? Colors.green.withOpacity(0.2) : Colors.green.withOpacity(0.1),
+                          ),
+                          padding: const EdgeInsets.all(20),
+                          child: const Icon(
+                            Icons.check_circle_rounded,
+                            color: Colors.green,
+                            size: 110,
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  child: const Text(
-                    'Got It',
+                  const SizedBox(height: 32),
+                  Text(
+                    'Login Berhasil !',
                     style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 24,
                       fontWeight: FontWeight.bold,
+                      color: textColor,
                     ),
                   ),
-                ),
+                  const Spacer(),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: buttonBgColor,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(
+                        'Got It',
+                        style: TextStyle(
+                          color: buttonTextColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
               ),
-              const SizedBox(height: 20),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -485,45 +586,33 @@ class _HomePageState extends State<HomePage> {
                   alignment: Alignment.center,
                   children: [
                     IconButton(
-                      tooltip: 'Notifikasi',
-                      onPressed: _isOpeningNotificationPage
-                          ? null
-                          : _openNotificationPage,
                       icon: Icon(
                         Icons.notifications,
                         color: theme.colorScheme.primary,
-                        size: 30,
+                        size: 28,
                       ),
+                      onPressed: _openNotificationPage,
                     ),
-
                     if (hasUnread)
                       Positioned(
-                        right: 6,
-                        top: 10,
-                        child: IgnorePointer(
-                          ignoring: true,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: theme.scaffoldBackgroundColor,
-                                width: 2,
-                              ),
+                        top: 12,
+                        right: 10,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: theme.appBarTheme.backgroundColor!,
+                              width: 2,
                             ),
-                            constraints: const BoxConstraints(
-                              minWidth: 18,
-                              minHeight: 18,
-                            ),
-                            child: Text(
-                              unreadCount > 99 ? '99+' : '$unreadCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              textAlign: TextAlign.center,
+                          ),
+                          child: Text(
+                            '$unreadCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
@@ -579,7 +668,9 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Halo, ${widget.userData['username'] ?? 'User'}. ${_getGreeting()}!',
+              isLoadingProfileName
+                  ? 'Halo. ${_getGreeting()}!'
+                  : 'Halo, ${_getDisplayName()}. ${_getGreeting()}!',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -686,6 +777,7 @@ class _HomePageState extends State<HomePage> {
                                 : Icons.visibility_off,
                             backgroundColor:
                                 value ? Colors.black : Colors.grey.shade800,
+                            isHighContrast: value,
                           );
                         },
                       ),
@@ -781,40 +873,35 @@ class _HomePageState extends State<HomePage> {
             else if (filteredJobs.isEmpty)
               Center(
                 child: Text(
-                  'Belum ada lowongan',
-                  style: TextStyle(
-                    color: theme.textTheme.bodyMedium?.color,
-                  ),
+                  'Tidak ada lowongan yang cocok',
+                  style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                 ),
               )
             else
               ...filteredJobs.map(
                 (job) {
-                  final jobMap = Map<String, dynamic>.from(job);
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _JobCard(
-                      title: jobMap['title'] ?? '-',
-                      company: jobMap['company_name'] ?? '-',
-                      location: jobMap['location'] ?? '-',
-                      type: jobMap['job_type'] ?? '-',
-                      desc: jobMap['description'] ?? '-',
-                      jobPhoto: jobMap['job_photo'], // Tambahkan ini
-                      isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
-                      onSave: () => toggleSaveJob(jobMap),
-                      onDetail: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => JobDetailPage(
-                              job: jobMap,
-                              currentUser: widget.userData,
+                  final jobMap = job as Map<String, dynamic>;
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: AccessibilityController.highContrastNotifier,
+                    builder: (context, isHighContrast, _) {
+                      return _JobCard(
+                        job: jobMap,
+                        isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
+                        isHighContrast: isHighContrast,
+                        onDetail: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => JobDetailPage(
+                                job: jobMap,
+                                currentUser: widget.userData,
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                        onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                      );
+                    },
                   );
                 },
               ),
@@ -876,94 +963,98 @@ class _CategoryButton extends StatelessWidget {
 }
 
 class _JobCard extends StatelessWidget {
-  final String title;
-  final String company;
-  final String location;
-  final String type;
-  final String desc;
-  final String? jobPhoto; // Tambahkan ini
+  final Map<String, dynamic> job;
   final bool isSaved;
+  final bool isHighContrast;
   final VoidCallback? onDetail;
   final VoidCallback? onSave;
 
   const _JobCard({
-    required this.title,
-    required this.company,
-    required this.location,
-    required this.type,
-    required this.desc,
-    this.jobPhoto, // Tambahkan ini
+    required this.job,
     required this.isSaved,
+    required this.isHighContrast,
     this.onDetail,
     this.onSave,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final subTextColor = isHighContrast ? Colors.white70 : Colors.black54;
+    final buttonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final outlineButtonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.black : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? Colors.yellow : Colors.grey.shade200,
+          color: isHighContrast ? outlineButtonColor.withOpacity(0.5) : Colors.grey.withOpacity(0.1),
         ),
-        boxShadow: isDark
-            ? null
-            : const [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
-                ),
-              ],
+        boxShadow: [
+          if (!isHighContrast)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (jobPhoto != null)
-                Container(
-                  width: 56,
-                  height: 56,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    image: DecorationImage(
-                      image: MemoryImage(base64Decode(jobPhoto!)),
-                      fit: BoxFit.cover,
-                    ),
+              if (job['job_photo'] != null &&
+                  job['job_photo'].toString().isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    base64Decode(job['job_photo']),
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const Icon(Icons.business),
                   ),
                 ),
+              if (job['job_photo'] == null ||
+                  job['job_photo'].toString().isEmpty)
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: isHighContrast ? Colors.yellow.withOpacity(0.3) : Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.business,
+                    color: isHighContrast ? AccessibilityTheme.yellow : Colors.grey.shade400,
+                  ),
+                ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                      job['title'] ?? 'Tanpa Judul',
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.yellow : Colors.black87,
+                        color: textColor,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      company,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      job['company_name'] ?? 'Perusahaan Anonim',
                       style: TextStyle(
-                        color: isDark
-                            ? Colors.yellow.withOpacity(0.7)
-                            : AppColors.textGray,
                         fontSize: 14,
+                        color: subTextColor,
                       ),
                     ),
                   ],
@@ -971,129 +1062,61 @@ class _JobCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 16,
-            runSpacing: 8,
+          const SizedBox(height: 16),
+          Row(
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.location_on,
-                    size: 16,
-                    color: isDark ? Colors.yellow : AppColors.textGray,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    location,
-                    style: TextStyle(
-                      color: isDark ? Colors.yellow : AppColors.textGray,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
+              Icon(Icons.location_on, color: subTextColor, size: 16),
+              const SizedBox(width: 4),
+              Text(
+                job['location'] ?? 'Lokasi tidak diketahui',
+                style: TextStyle(color: subTextColor),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.work,
-                    size: 16,
-                    color: isDark ? Colors.yellow : AppColors.textGray,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    type,
-                    style: TextStyle(
-                      color: isDark ? Colors.yellow : AppColors.textGray,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 16),
+              Icon(Icons.work, color: subTextColor, size: 16),
+              const SizedBox(width: 4),
+              Text(
+                job['job_type'] ?? 'Tipe tidak diketahui',
+                style: TextStyle(color: subTextColor),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Text(
-            desc,
+            job['description'] ?? 'Tidak ada deskripsi',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color:
-                  isDark ? Colors.yellow.withOpacity(0.8) : AppColors.textGray,
-              fontSize: 12,
-              height: 1.4,
-            ),
+            style: TextStyle(color: subTextColor),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   onPressed: onDetail,
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                    ),
-                    foregroundColor: isDark ? Colors.yellow : Colors.black87,
-                    side: BorderSide(
-                      color: isDark ? Colors.yellow : Colors.black87,
-                    ),
+                    foregroundColor: outlineButtonColor,
+                    side: BorderSide(color: outlineButtonColor),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text(
-                    'Lihat Detail',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: const Text('Lihat Detail'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: onSave,
                   icon: Icon(
                     isSaved ? Icons.bookmark : Icons.bookmark_border,
-                    size: 16,
-                    color: isSaved
-                        ? (isDark ? Colors.black : Colors.white)
-                        : (isDark ? Colors.yellow : Colors.black87),
+                    color: isSaved ? buttonTextColor : buttonTextColor,
                   ),
-                  label: Text(
-                    isSaved ? 'Tersimpan' : 'Simpan',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isSaved
-                          ? (isDark ? Colors.black : Colors.white)
-                          : (isDark ? Colors.yellow : Colors.black87),
-                    ),
-                  ),
+                  label: Text(isSaved ? 'Tersimpan' : 'Simpan'),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 4,
-                    ),
-                    elevation: 0,
-                    backgroundColor: isSaved
-                        ? (isDark ? Colors.yellow : AppColors.primaryNavy)
-                        : Colors.transparent,
+                    backgroundColor: buttonColor,
+                    foregroundColor: buttonTextColor,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(
-                        color: isDark
-                            ? Colors.yellow
-                            : (isSaved
-                                ? AppColors.primaryNavy
-                                : Colors.black87),
-                      ),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),

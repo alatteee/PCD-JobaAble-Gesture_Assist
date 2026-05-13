@@ -50,6 +50,100 @@ class _CompanyHomePageState extends State<CompanyHomePage> {
   void initState() {
     super.initState();
     _loadDashboardData();
+
+    if (widget.showSuccessDialog) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showLoginSuccessDialog();
+      });
+    }
+  }
+
+  void _showLoginSuccessDialog() {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(28, 72, 28, 28),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(42),
+              topRight: Radius.circular(42),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 128,
+                  height: 128,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEAF6ED),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 78,
+                      height: 78,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF4CAF50),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 34),
+                const Text(
+                  'Login Berhasil !',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: CompanyHomePage.navy,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 78),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: CompanyHomePage.navy,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Text(
+                      'Got It',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadDashboardData() async {
@@ -83,7 +177,6 @@ class _CompanyHomePageState extends State<CompanyHomePage> {
         if (!mounted) return;
 
         setState(() {
-          // Saat refresh offline, jangan hapus data dashboard yang sudah tampil.
           isLoading = false;
         });
 
@@ -120,7 +213,6 @@ class _CompanyHomePageState extends State<CompanyHomePage> {
       if (!mounted) return;
 
       setState(() {
-        // Kalau request gagal karena offline, pertahankan data lama + foto yang sudah dicache.
         applicants = _mergeApplicantsWithCachedPhotos(applicants);
         isLoading = false;
       });
@@ -157,9 +249,7 @@ class _CompanyHomePageState extends State<CompanyHomePage> {
 
   String? _textOrNull(dynamic value) {
     final text = value?.toString().trim();
-
     if (text == null || text.isEmpty) return null;
-
     return text;
   }
 
@@ -175,11 +265,9 @@ class _CompanyHomePageState extends State<CompanyHomePage> {
 
   String _getGreeting() {
     final hour = DateTime.now().hour;
-
     if (hour < 11) return 'Selamat Pagi';
     if (hour < 15) return 'Selamat Siang';
     if (hour < 18) return 'Selamat Sore';
-
     return 'Selamat Malam';
   }
 

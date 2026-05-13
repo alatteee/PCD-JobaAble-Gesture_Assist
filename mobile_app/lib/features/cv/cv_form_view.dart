@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
+import '../profile/accessibility_settings_view.dart';
 import 'cv_controller.dart';
 
 class CvFormView extends StatefulWidget {
@@ -209,126 +210,166 @@ class _CvFormViewState extends State<CvFormView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(widget.existingCv == null ? 'Buat CV Digital' : 'Edit CV Digital', 
-          style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryNavy)),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.primaryNavy),
-      ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSectionTitle('Ringkasan Diri'),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _summaryController,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'Ceritakan singkat tentang dirimu...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  fillColor: Colors.grey.withOpacity(0.05),
-                  filled: true,
-                ),
-                validator: (v) => v == null || v.isEmpty ? 'Ringkasan tidak boleh kosong' : null,
-              ),
-              const SizedBox(height: 24),
+    return ValueListenableBuilder<bool>(
+      valueListenable: AccessibilityController.highContrastNotifier,
+      builder: (context, isHighContrast, _) {
+        final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+        final appBarTextColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+        final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+        final buttonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+        final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+        final inputFillColor = isHighContrast 
+            ? Colors.white.withOpacity(0.1) 
+            : Colors.grey.withOpacity(0.05);
+        final inputTextColor = isHighContrast ? Colors.white : Colors.black;
+        final hintTextColor = isHighContrast ? Colors.white54 : null;
+        final chipBgColor = isHighContrast 
+            ? AccessibilityTheme.yellow.withOpacity(0.2) 
+            : AppColors.primaryNavy.withOpacity(0.1);
+        final chipTextColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
 
-              _buildHeaderWithAction('Pendidikan', _addEducation),
-              ...education.asMap().entries.map((e) => _buildListItem(
-                title: e.value['school']!,
-                subtitle: '${e.value['major']} (${e.value['year']})',
-                onDelete: () => setState(() => education.removeAt(e.key)),
-              )),
-              const SizedBox(height: 24),
-
-              _buildHeaderWithAction('Pengalaman Kerja', _addExperience),
-              ...experience.asMap().entries.map((e) => _buildListItem(
-                title: e.value['position']!,
-                subtitle: '${e.value['company']} | ${e.value['duration']}',
-                onDelete: () => setState(() => experience.removeAt(e.key)),
-              )),
-              const SizedBox(height: 24),
-
-              _buildHeaderWithAction('Keahlian (Skills)', _addSkill),
-              Wrap(
-                spacing: 8,
-                children: skills.asMap().entries.map((e) => Chip(
-                  label: Text(e.value),
-                  onDeleted: () => setState(() => skills.removeAt(e.key)),
-                  backgroundColor: AppColors.primaryNavy.withOpacity(0.1),
-                  labelStyle: const TextStyle(color: AppColors.primaryNavy, fontWeight: FontWeight.bold),
-                )).toList(),
-              ),
-              const SizedBox(height: 24),
-
-              _buildHeaderWithAction('Sertifikasi', _addCertification),
-              ...certifications.asMap().entries.map((e) => _buildListItem(
-                title: e.value,
-                onDelete: () => setState(() => certifications.removeAt(e.key)),
-              )),
-              const SizedBox(height: 24),
-
-              _buildSectionTitle('Link Portofolio'),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _portfolioController,
-                decoration: InputDecoration(
-                  hintText: 'https://...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.link),
-                ),
-              ),
-              const SizedBox(height: 40),
-
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _saveCv,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryNavy,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  child: const Text('Simpan CV', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
+        return Scaffold(
+          backgroundColor: bgColor,
+          appBar: AppBar(
+            title: Text(widget.existingCv == null ? 'Buat CV Digital' : 'Edit CV Digital', 
+              style: TextStyle(fontWeight: FontWeight.bold, color: appBarTextColor)),
+            backgroundColor: bgColor,
+            elevation: 0,
+            iconTheme: IconThemeData(color: appBarTextColor),
           ),
-        ),
-      ),
+          body: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSectionTitle('Ringkasan Diri', textColor),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _summaryController,
+                    maxLines: 4,
+                    style: TextStyle(color: inputTextColor),
+                    decoration: InputDecoration(
+                      hintText: 'Ceritakan singkat tentang dirimu...',
+                      hintStyle: TextStyle(color: hintTextColor),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      fillColor: inputFillColor,
+                      filled: true,
+                    ),
+                    validator: (v) => v == null || v.isEmpty ? 'Ringkasan tidak boleh kosong' : null,
+                  ),
+                  const SizedBox(height: 24),
+
+                  _buildHeaderWithAction('Pendidikan', _addEducation, textColor),
+                  ...education.asMap().entries.map((e) => _buildListItem(
+                    title: e.value['school']!,
+                    subtitle: '${e.value['major']} (${e.value['year']})',
+                    onDelete: () => setState(() => education.removeAt(e.key)),
+                    isHighContrast: isHighContrast,
+                  )),
+                  const SizedBox(height: 24),
+
+                  _buildHeaderWithAction('Pengalaman Kerja', _addExperience, textColor),
+                  ...experience.asMap().entries.map((e) => _buildListItem(
+                    title: e.value['position']!,
+                    subtitle: '${e.value['company']} | ${e.value['duration']}',
+                    onDelete: () => setState(() => experience.removeAt(e.key)),
+                    isHighContrast: isHighContrast,
+                  )),
+                  const SizedBox(height: 24),
+
+                  _buildHeaderWithAction('Keahlian (Skills)', _addSkill, textColor),
+                  Wrap(
+                    spacing: 8,
+                    children: skills.asMap().entries.map((e) => Chip(
+                      label: Text(e.value),
+                      onDeleted: () => setState(() => skills.removeAt(e.key)),
+                      backgroundColor: chipBgColor,
+                      labelStyle: TextStyle(color: chipTextColor, fontWeight: FontWeight.bold),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 24),
+
+                  _buildHeaderWithAction('Sertifikasi', _addCertification, textColor),
+                  ...certifications.asMap().entries.map((e) => _buildListItem(
+                    title: e.value,
+                    onDelete: () => setState(() => certifications.removeAt(e.key)),
+                    isHighContrast: isHighContrast,
+                  )),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('Link Portofolio', textColor),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _portfolioController,
+                    style: TextStyle(color: inputTextColor),
+                    decoration: InputDecoration(
+                      hintText: 'https://...',
+                      hintStyle: TextStyle(color: hintTextColor),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: Icon(Icons.link, color: textColor),
+                      fillColor: inputFillColor,
+                      filled: true,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _saveCv,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: buttonColor,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: Text('Simpan CV', style: TextStyle(color: buttonTextColor, fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryNavy));
+  Widget _buildSectionTitle(String title, Color color) {
+    return Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color));
   }
 
-  Widget _buildHeaderWithAction(String title, VoidCallback onAction) {
+  Widget _buildHeaderWithAction(String title, VoidCallback onAction, Color color) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        _buildSectionTitle(title),
-        IconButton(onPressed: onAction, icon: const Icon(Icons.add_circle_outline, color: AppColors.primaryNavy)),
+        _buildSectionTitle(title, color),
+        IconButton(onPressed: onAction, icon: Icon(Icons.add_circle_outline, color: color)),
       ],
     );
   }
 
-  Widget _buildListItem({required String title, String? subtitle, required VoidCallback onDelete}) {
+  Widget _buildListItem({required String title, String? subtitle, required VoidCallback onDelete, bool isHighContrast = false}) {
+    final cardColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : Colors.black;
+    final subtextColor = isHighContrast ? Colors.white70 : Colors.grey;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isHighContrast ? BorderSide(color: AccessibilityTheme.yellow.withOpacity(0.3)) : BorderSide.none,
+      ),
       child: ListTile(
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: subtitle != null ? Text(subtitle) : null,
-        trailing: IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: onDelete),
+        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+        subtitle: subtitle != null ? Text(subtitle, style: TextStyle(color: subtextColor)) : null,
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.red),
+          onPressed: onDelete,
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
+import '../profile/accessibility_settings_view.dart';
 import 'cv_controller.dart';
 import 'cv_form_view.dart';
 import 'cv_detail_view.dart';
@@ -42,13 +43,28 @@ class _CvViewState extends State<CvView> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: cvData == null ? _buildEmptyState() : _buildCvCard(),
+    return ValueListenableBuilder<bool>(
+      valueListenable: AccessibilityController.highContrastNotifier,
+      builder: (context, isHighContrast, _) {
+        final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+        return Scaffold(
+          backgroundColor: bgColor,
+          body: cvData == null ? _buildEmptyState(context, isHighContrast) : _buildCvCard(context, isHighContrast),
+        );
+      },
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context, bool isHighContrast) {
+    final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final subtextColor = isHighContrast ? Colors.white70 : Colors.grey;
+    final buttonBgColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final circleBgColor = isHighContrast 
+        ? AccessibilityTheme.yellow.withOpacity(0.1) 
+        : AppColors.primaryNavy.withOpacity(0.05);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40.0),
@@ -58,21 +74,21 @@ class _CvViewState extends State<CvView> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: AppColors.primaryNavy.withOpacity(0.05),
+                color: circleBgColor,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.description_outlined, size: 80, color: AppColors.primaryNavy),
+              child: Icon(Icons.description_outlined, size: 80, color: textColor),
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'Belum ada CV',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Buat CV digital agar kamu dapat melamar pekerjaan dengan lebih mudah.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.grey, height: 1.5),
+              style: TextStyle(fontSize: 16, color: subtextColor, height: 1.5),
             ),
             const SizedBox(height: 32),
             SizedBox(
@@ -87,10 +103,10 @@ class _CvViewState extends State<CvView> {
                   if (result == true) _fetchCv();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryNavy,
+                  backgroundColor: buttonBgColor,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 ),
-                child: const Text('Buat CV', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                child: Text('Buat CV', style: TextStyle(color: buttonTextColor, fontSize: 18, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -99,8 +115,15 @@ class _CvViewState extends State<CvView> {
     );
   }
 
-  Widget _buildCvCard() {
+  Widget _buildCvCard(BuildContext context, bool isHighContrast) {
     final List skills = cvData!['skills'] ?? [];
+    final cardBgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final bodyTextColor = isHighContrast ? Colors.white.withOpacity(0.87) : Colors.black87;
+    final buttonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonBgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final outlineBorderColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -109,9 +132,10 @@ class _CvViewState extends State<CvView> {
             width: double.infinity,
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: cardBgColor,
               borderRadius: BorderRadius.circular(24),
-              boxShadow: [
+              border: isHighContrast ? Border.all(color: AccessibilityTheme.yellow, width: 1) : null,
+              boxShadow: isHighContrast ? [] : [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.05),
                   blurRadius: 20,
@@ -122,11 +146,11 @@ class _CvViewState extends State<CvView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.person_outline, color: AppColors.primaryNavy),
-                    SizedBox(width: 8),
-                    Text('Ringkasan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Icon(Icons.person_outline, color: textColor),
+                    const SizedBox(width: 8),
+                    Text('Ringkasan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -134,14 +158,14 @@ class _CvViewState extends State<CvView> {
                   cvData!['summary'] ?? '-',
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 15, color: Colors.black87),
+                  style: TextStyle(fontSize: 15, color: bodyTextColor),
                 ),
                 const SizedBox(height: 20),
-                const Divider(),
+                Divider(color: isHighContrast ? Colors.white24 : null),
                 const SizedBox(height: 12),
                 Text(
                   '${skills.length} Keahlian ditambahkan',
-                  style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.primaryNavy),
+                  style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
                 ),
                 const SizedBox(height: 24),
                 Row(
@@ -156,11 +180,12 @@ class _CvViewState extends State<CvView> {
                           if (result == true) _fetchCv();
                         },
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.primaryNavy),
+                          foregroundColor: outlineBorderColor,
+                          side: BorderSide(color: outlineBorderColor),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        child: const Text('Edit CV', style: TextStyle(color: AppColors.primaryNavy, fontWeight: FontWeight.bold)),
+                        child: const Text('Edit CV', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -173,11 +198,12 @@ class _CvViewState extends State<CvView> {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primaryNavy,
+                          backgroundColor: buttonColor,
+                          foregroundColor: isHighContrast ? AccessibilityTheme.black : Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        child: const Text('Lihat CV', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        child: Text('Lihat CV', style: TextStyle(color: isHighContrast ? AccessibilityTheme.black : Colors.white, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],

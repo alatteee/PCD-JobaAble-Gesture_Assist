@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
+import '../profile/accessibility_settings_view.dart';
 
 class JobSeekerNotificationDetailPage extends StatefulWidget {
   final Map<String, dynamic> notification;
@@ -186,7 +187,9 @@ class _JobSeekerNotificationDetailPageState
     }
   }
 
-  Color _typeColor(String type, String status) {
+  Color _typeColor(String type, String status, {bool isHighContrast = false}) {
+    if (isHighContrast) return AccessibilityTheme.yellow;
+
     if (type == 'application_rejected') {
       return redText;
     }
@@ -322,52 +325,64 @@ class _JobSeekerNotificationDetailPageState
       fallback: '-',
     );
 
-    final typeColor = _typeColor(type, status);
+    return ValueListenableBuilder<bool>(
+      valueListenable: AccessibilityController.highContrastNotifier,
+      builder: (context, isHighContrast, _) {
+        final typeColor = _typeColor(type, status, isHighContrast: isHighContrast);
+        final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+        final mainColor = isHighContrast ? AccessibilityTheme.yellow : navy;
+        final textColor = isHighContrast ? AccessibilityTheme.yellow : textGrey;
+        final cardColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: navy),
-        title: const Text(
-          'Detail Notifikasi',
-          style: TextStyle(
-            color: navy,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ),
-      body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator(
-                color: navy,
+        return Scaffold(
+          backgroundColor: bgColor,
+          appBar: AppBar(
+            backgroundColor: bgColor,
+            elevation: 0,
+            iconTheme: IconThemeData(color: mainColor),
+            title: Text(
+              'Detail Notifikasi',
+              style: TextStyle(
+                color: mainColor,
+                fontWeight: FontWeight.w900,
               ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-              children: [
-                _buildHeaderCard(
-                  title: title,
-                  message: message,
-                  type: type,
-                  status: status,
-                  color: typeColor,
-                ),
-                const SizedBox(height: 18),
-                _buildMainInfoCard(
-                  jobTitle: jobTitle,
-                  companyName: companyName,
-                  status: status,
-                ),
-                const SizedBox(height: 18),
-                _buildDynamicDetailCard(
-                  type: type,
-                  status: status,
-                  message: message,
-                ),
-              ],
             ),
+          ),
+          body: isLoading
+              ? Center(
+                  child: CircularProgressIndicator(
+                    color: mainColor,
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+                  children: [
+                    _buildHeaderCard(
+                      title: title,
+                      message: message,
+                      type: type,
+                      status: status,
+                      color: typeColor,
+                      isHighContrast: isHighContrast,
+                    ),
+                    const SizedBox(height: 18),
+                    _buildMainInfoCard(
+                      jobTitle: jobTitle,
+                      companyName: companyName,
+                      status: status,
+                      isHighContrast: isHighContrast,
+                    ),
+                    const SizedBox(height: 18),
+                    _buildDynamicDetailCard(
+                      type: type,
+                      status: status,
+                      message: message,
+                      isHighContrast: isHighContrast,
+                    ),
+                  ],
+                ),
+        );
+      },
     );
   }
 
@@ -377,10 +392,15 @@ class _JobSeekerNotificationDetailPageState
     required String type,
     required String status,
     required Color color,
+    required bool isHighContrast,
   }) {
+    final mainColor = isHighContrast ? AccessibilityTheme.yellow : navy;
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : textGrey;
+    final cardBgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(isHighContrast: isHighContrast),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -403,10 +423,10 @@ class _JobSeekerNotificationDetailPageState
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 21,
                     fontWeight: FontWeight.w900,
-                    color: navy,
+                    color: mainColor,
                   ),
                 ),
               ),
@@ -415,20 +435,20 @@ class _JobSeekerNotificationDetailPageState
           const SizedBox(height: 16),
           Text(
             message,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               height: 1.45,
               fontWeight: FontWeight.w600,
-              color: textGrey,
+              color: textColor,
             ),
           ),
           const SizedBox(height: 14),
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.access_time_rounded,
                 size: 17,
-                color: textGrey,
+                color: textColor,
               ),
               const SizedBox(width: 7),
               Text(
@@ -436,7 +456,7 @@ class _JobSeekerNotificationDetailPageState
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: textGrey.withOpacity(0.8),
+                  color: textColor.withOpacity(0.8),
                 ),
               ),
             ],
@@ -450,19 +470,22 @@ class _JobSeekerNotificationDetailPageState
     required String jobTitle,
     required String companyName,
     required String status,
+    required bool isHighContrast,
   }) {
+    final mainColor = isHighContrast ? AccessibilityTheme.yellow : navy;
+
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(isHighContrast: isHighContrast),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Informasi Lamaran',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w900,
-              color: navy,
+              color: mainColor,
             ),
           ),
           const SizedBox(height: 14),
@@ -470,16 +493,19 @@ class _JobSeekerNotificationDetailPageState
             icon: Icons.work_rounded,
             label: 'Posisi',
             value: jobTitle,
+            isHighContrast: isHighContrast,
           ),
           _infoRow(
             icon: Icons.business_rounded,
             label: 'Perusahaan',
             value: companyName,
+            isHighContrast: isHighContrast,
           ),
           _infoRow(
             icon: Icons.fact_check_rounded,
             label: 'Status Saat Notifikasi',
             value: _statusLabel(status),
+            isHighContrast: isHighContrast,
           ),
         ],
       ),
@@ -490,6 +516,7 @@ class _JobSeekerNotificationDetailPageState
     required String type,
     required String status,
     required String message,
+    required bool isHighContrast,
   }) {
     final normalized = _normalizeStatus(status);
 
@@ -498,16 +525,19 @@ class _JobSeekerNotificationDetailPageState
         normalized == 'wawancara') {
       return _sectionCard(
         title: 'Detail Wawancara',
+        isHighContrast: isHighContrast,
         children: [
           _infoRow(
             icon: Icons.calendar_month_rounded,
             label: 'Jadwal',
             value: _getInterviewDisplayFromNotification(),
+            isHighContrast: isHighContrast,
           ),
           _infoRow(
             icon: Icons.notes_rounded,
             label: 'Catatan',
             value: _getInterviewNoteFromNotification(),
+            isHighContrast: isHighContrast,
           ),
         ],
       );
@@ -516,21 +546,25 @@ class _JobSeekerNotificationDetailPageState
     if (type == 'application_accepted' || normalized == 'diterima') {
       return _sectionCard(
         title: 'Detail Penerimaan',
+        isHighContrast: isHighContrast,
         children: [
           _infoRow(
             icon: Icons.message_rounded,
             label: 'Pesan Penerimaan',
             value: _text(application?['accepted_message']),
+            isHighContrast: isHighContrast,
           ),
           _infoRow(
             icon: Icons.calendar_today_rounded,
             label: 'Tanggal Mulai Kerja',
             value: _text(application?['start_work_date']),
+            isHighContrast: isHighContrast,
           ),
           _infoRow(
             icon: Icons.info_rounded,
             label: 'Info Tambahan',
             value: _text(application?['work_info']),
+            isHighContrast: isHighContrast,
           ),
         ],
       );
@@ -539,11 +573,13 @@ class _JobSeekerNotificationDetailPageState
     if (type == 'application_rejected' || normalized == 'ditolak') {
       return _sectionCard(
         title: 'Detail Penolakan',
+        isHighContrast: isHighContrast,
         children: [
           _infoRow(
             icon: Icons.report_problem_rounded,
             label: 'Alasan Penolakan',
             value: _text(application?['rejection_reason']),
+            isHighContrast: isHighContrast,
           ),
         ],
       );
@@ -551,6 +587,7 @@ class _JobSeekerNotificationDetailPageState
 
     return _sectionCard(
       title: 'Detail Status',
+      isHighContrast: isHighContrast,
       children: [
         _infoRow(
           icon: Icons.manage_search_rounded,
@@ -558,6 +595,7 @@ class _JobSeekerNotificationDetailPageState
           value: normalized == 'ditinjau'
               ? 'Lamaran kamu sedang ditinjau oleh perusahaan.'
               : message,
+          isHighContrast: isHighContrast,
         ),
       ],
     );
@@ -566,19 +604,22 @@ class _JobSeekerNotificationDetailPageState
   Widget _sectionCard({
     required String title,
     required List<Widget> children,
+    required bool isHighContrast,
   }) {
+    final mainColor = isHighContrast ? AccessibilityTheme.yellow : navy;
+
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: _cardDecoration(),
+      decoration: _cardDecoration(isHighContrast: isHighContrast),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w900,
-              color: navy,
+              color: mainColor,
             ),
           ),
           const SizedBox(height: 14),
@@ -592,7 +633,11 @@ class _JobSeekerNotificationDetailPageState
     required IconData icon,
     required String label,
     required String value,
+    required bool isHighContrast,
   }) {
+    final textColor = isHighContrast ? AccessibilityTheme.yellow : textGrey;
+    final mainColor = isHighContrast ? AccessibilityTheme.yellow : navy;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 13),
       child: Row(
@@ -600,8 +645,8 @@ class _JobSeekerNotificationDetailPageState
         children: [
           Icon(
             icon,
-            color: navy,
-            size: 21,
+            size: 20,
+            color: textColor.withOpacity(0.8),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -612,18 +657,17 @@ class _JobSeekerNotificationDetailPageState
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: textGrey.withOpacity(0.75),
+                    fontWeight: FontWeight.w600,
+                    color: textColor.withOpacity(0.8),
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text(
-                  value.trim().isEmpty ? '-' : value,
-                  style: const TextStyle(
+                  value,
+                  style: TextStyle(
                     fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: navy,
-                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                    color: mainColor,
                   ),
                 ),
               ],
@@ -634,20 +678,22 @@ class _JobSeekerNotificationDetailPageState
     );
   }
 
-  BoxDecoration _cardDecoration() {
+  BoxDecoration _cardDecoration({required bool isHighContrast}) {
+    final cardBgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final shadowColor = isHighContrast ? Colors.transparent : Colors.black.withOpacity(0.04);
+    final borderColor = isHighContrast ? AccessibilityTheme.yellow.withOpacity(0.2) : Colors.grey.withOpacity(0.1);
+
     return BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
+      color: cardBgColor,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: borderColor),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.08),
+          color: shadowColor,
           blurRadius: 12,
           offset: const Offset(0, 5),
         ),
       ],
-      border: Border.all(
-        color: lightBlue.withOpacity(0.6),
-      ),
     );
   }
 }
