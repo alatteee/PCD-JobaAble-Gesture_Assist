@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -12,17 +14,49 @@ import 'services/sync_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: ".env");
-  await OfflineService.init();
-  await MongoService.connect();
+  // Handle Mongo/Socket errors to prevent red screen of death
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final errorText = details.exceptionAsString();
 
-  // Register Adapter and Open Box for GestureLog
-  if (!Hive.isAdapterRegistered(GestureLogModelAdapter().typeId)) {
-    Hive.registerAdapter(GestureLogModelAdapter());
-  }
-  await Hive.openBox<GestureLogModel>('gestureLogs');
+    if (_isIgnoredMongoSocketError(errorText)) {
+      print('⚠️ Ignored Mongo socket disconnect from FlutterError: $errorText');
+      return;
+    }
 
-  runApp(const JobAbleApp());
+    FlutterError.presentError(details);
+  };
+
+  runZonedGuarded(() async {
+    await dotenv.load(fileName: ".env");
+    await OfflineService.init();
+    await MongoService.connect();
+
+    // Register Adapter and Open Box for GestureLog
+    if (!Hive.isAdapterRegistered(GestureLogModelAdapter().typeId)) {
+      Hive.registerAdapter(GestureLogModelAdapter());
+    }
+    await Hive.openBox<GestureLogModel>('gestureLogs');
+
+    runApp(const JobAbleApp());
+  }, (error, stack) {
+    final errorText = error.toString();
+
+    if (_isIgnoredMongoSocketError(errorText)) {
+      print('⚠️ Ignored async Mongo disconnect: $errorText');
+      return;
+    }
+
+    print('❌ Unhandled error: $error');
+    print(stack);
+  });
+}
+
+bool _isIgnoredMongoSocketError(String errorText) {
+  return errorText.contains('Software caused connection abort') ||
+      errorText.contains('No master connection') ||
+      errorText.contains('connection closed') ||
+      errorText.contains('MongoDB ConnectionException') ||
+      errorText.contains('SocketException');
 }
 
 class JobAbleApp extends StatefulWidget {

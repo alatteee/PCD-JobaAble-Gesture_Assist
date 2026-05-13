@@ -4,6 +4,8 @@ import 'offline_service.dart';
 import 'mongo_service.dart';
 import '../features/profile/profile_controller.dart';
 import '../features/cv/cv_controller.dart';
+import '../features/gesture_assist/services/gesture_log_local_service.dart';
+import '../features/gesture_assist/services/gesture_log_remote_service.dart';
 
 class SyncService {
   static bool _isSyncing = false;
@@ -159,6 +161,10 @@ class SyncService {
 
       await OfflineService.clearSyncQueue();
 
+      // --- New: Sync Gesture Assist Logs ---
+      await _syncGestureLogs();
+      // ------------------------------------
+
       for (final failedItem in failedItems) {
         await OfflineService.addToSyncQueue(
           failedItem['action']?.toString() ?? '',
@@ -215,5 +221,33 @@ class SyncService {
 
     print('⚠️ Unknown sync action: $action');
     return false;
+  }
+
+  static Future<void> _syncGestureLogs() async {
+    try {
+      final localService = GestureLogLocalService();
+      final remoteService = GestureLogRemoteService();
+
+      final pendingLogs = await localService.getPendingGestureLogs();
+
+      if (pendingLogs.isEmpty) {
+        print('DEBUG: No pending gesture logs to sync');
+        return;
+      }
+
+      print('📤 Syncing ${pendingLogs.length} gesture logs...');
+      final success = await remoteService.syncGestureLogs(pendingLogs);
+
+      if (success) {
+        for (var log in pendingLogs) {
+          await localService.updateSyncStatus(log.id, 'synced');
+        }
+        print('✅ Gesture logs synced successfully');
+      } else {
+        print('❌ Failed to sync gesture logs');
+      }
+    } catch (e) {
+      print('❌ ERROR syncing gesture logs: $e');
+    }
   }
 }

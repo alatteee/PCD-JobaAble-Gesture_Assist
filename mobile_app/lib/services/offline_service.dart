@@ -208,4 +208,47 @@ class OfflineService {
     final box = Hive.box(settingsBoxName);
     await box.delete('loggedInUser');
   }
+
+  // --- Cache Management & Debugging ---
+  /// Hapus cache jobs untuk memaksa fetch ulang dari MongoDB
+  static Future<void> clearJobsCache() async {
+    try {
+      final box = Hive.box(jobsBoxName);
+      await box.clear();
+      print('✅ Jobs cache cleared successfully');
+    } catch (e) {
+      print('❌ Error clearing jobs cache: $e');
+    }
+  }
+
+  /// Hapus semua cache
+  static Future<void> clearAllCache() async {
+    try {
+      await Hive.box(jobsBoxName).clear();
+      await Hive.box(applicationsBoxName).clear();
+      await Hive.box(userProfileBoxName).clear();
+      await Hive.box(userCVBoxName).clear();
+      await Hive.box(companyProfileBoxName).clear();
+      await Hive.box(companyJobsBoxName).clear();
+      await Hive.box(companyApplicantsBoxName).clear();
+      await Hive.box(pendingSyncBoxName).clear();
+      print('✅ All cache cleared successfully');
+    } catch (e) {
+      print('❌ Error clearing all cache: $e');
+    }
+  }
+
+  /// Debug: Tampilkan jumlah jobs yang di-cache
+  static void debugCachedJobsCount() {
+    final box = Hive.box(jobsBoxName);
+    print('📊 DEBUG: Total cached jobs: ${box.length}');
+    if (box.isNotEmpty) {
+      final firstJob = box.values.first as Map;
+      print('📊 DEBUG: First job has job_photo: ${firstJob.containsKey('job_photo')}');
+      if (firstJob.containsKey('job_photo')) {
+        final photoLength = firstJob['job_photo']?.toString().length ?? 0;
+        print('📊 DEBUG: job_photo field size: ${photoLength} bytes');
+      }
+    }
+  }
 }

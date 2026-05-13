@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:mongo_dart/mongo_dart.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -9,8 +11,39 @@ class MongoService {
   static late DbCollection users;
   static late DbCollection userDetails;
   static late DbCollection cvs;
+  static late DbCollection gestureLogs;
 
   static bool _isConnecting = false;
+  static Future<void>? _connectFuture;
+  static DateTime? _lastConnectFailedAt;
+
+  static bool get _isInConnectCooldown {
+    final lastFailed = _lastConnectFailedAt;
+    if (lastFailed == null) return false;
+    return DateTime.now().difference(lastFailed) < const Duration(seconds: 5);
+  }
+
+  /// connectivity_plus hanya mendeteksi jaringan. Setelah offline -> online,
+  /// DNS/route belum tentu siap. mongo_dart Atlas SRV juga butuh resolve DNS.
+  static Future<bool> hasStableInternet({int retries = 3}) async {
+    final hasConnection = await connectivityService.checkConnection();
+    if (!hasConnection) return false;
+
+    for (int i = 0; i < retries; i++) {
+      try {
+        final result = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 2));
+        if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+          return true;
+        }
+      } catch (e) {
+        print('🌐 Stable Internet Check attempt ${i + 1} failed: $e');
+      }
+
+      await Future.delayed(const Duration(milliseconds: 800));
+    }
+
+    return false;
+  }
 
   /// Tutup koneksi lama dengan paksa dan reset semua reference
   static Future<void> _forceCloseOldConnection() async {
@@ -27,6 +60,27 @@ class MongoService {
   }
 
   static Future<void> connect() async {
+    if (_isDbOpen) return;
+
+    if (_connectFuture != null) {
+      await _connectFuture;
+      return;
+    }
+
+    if (_isInConnectCooldown) {
+      print('⏳ MongoDB connect skipped: still in cooldown after previous failure.');
+      return;
+    }
+
+    _connectFuture = _connectInternal();
+    try {
+      await _connectFuture;
+    } finally {
+      _connectFuture = null;
+    }
+  }
+
+  static Future<void> _connectInternal() async {
     final uri = dotenv.env['MONGODB_URI'];
 
     if (uri == null || uri.isEmpty) {
@@ -35,6 +89,13 @@ class MongoService {
 
     if (_isDbOpen) return;
     if (_isConnecting) return;
+
+    final stableInternet = await hasStableInternet(retries: 4);
+    if (!stableInternet) {
+      _lastConnectFailedAt = DateTime.now();
+      print('📴 MongoDB connect skipped: internet/DNS is not stable yet.');
+      return;
+    }
 
     _isConnecting = true;
     try {
@@ -50,17 +111,20 @@ class MongoService {
 
       print('🔄 Connecting to MongoDB Atlas (fresh connection)...');
       db = await Db.create(finalUri);
-      await db.open();
+      await db.open().timeout(const Duration(seconds: 20));
 
       users = db.collection('users');
       userDetails = db.collection('user_details');
       cvs = db.collection('cvs');
+      gestureLogs = db.collection('gesture_logs');
+      _lastConnectFailedAt = null;
 
       print('✅ MongoDB Connected (NEW)');
     } catch (e) {
+      _lastConnectFailedAt = DateTime.now();
       print('❌ Gagal koneksi ke MongoDB: $e');
       try {
-        await db.close();
+        await db.close().timeout(const Duration(seconds: 3));
       } catch (_) {}
     } finally {
       _isConnecting = false;
@@ -85,8 +149,8 @@ class MongoService {
         return false;
       }
 
-      // Coba ping dengan query minimal ke collection users
-      final result = await users.findOne(where.limit(1));
+      users = db.collection('users');
+      await users.findOne(where.limit(1)).timeout(const Duration(seconds: 8));
       print('✅ verifyConnected: DB connection is LIVE');
       return true;
     } catch (e) {
@@ -95,52 +159,51 @@ class MongoService {
     }
   }
 
-  static Future<void> ensureConnected() async {
-    final hasConnection = await connectivityService.checkConnection();
-    if (!hasConnection) {
-      print('DEBUG: ensureConnected skipped - No Internet');
-      return; 
+  static Future<void> forceReconnect() async {
+    print('🔁 Force reconnecting MongoDB...');
+
+    final stableInternet = await hasStableInternet(retries: 5);
+    if (!stableInternet) {
+      _lastConnectFailedAt = DateTime.now();
+      print('📴 Force reconnect cancelled: internet/DNS is not stable yet.');
+      return;
+    }
+
+    _isConnecting = false;
+    await _forceCloseOldConnection();
+    await Future.delayed(const Duration(seconds: 1));
+    await connect();
+  }
+
+  static Future<bool> ensureConnected() async {
+    final stableInternet = await hasStableInternet(retries: 2);
+    if (!stableInternet) {
+      print('DEBUG: ensureConnected skipped - Internet/DNS not stable');
+      return false; 
     }
 
     if (!_isDbOpen) {
-      print('🔄 MongoDB disconnected. Force reconnecting...');
-      
-      // Reset flag koneksi yang sedang berlangsung jika terjadi stall
-      if (_isConnecting) {
-        print('⚠️ Previous connection attempt is still in progress. Aborting it.');
-        _isConnecting = false;
-        await _forceCloseOldConnection();
-      }
-      
-      // Tunggu jangan langsung connect, beri waktu cleanup
-      await Future.delayed(const Duration(milliseconds: 200));
-      
+      print('🔄 MongoDB disconnected. Connecting...');
       await connect();
-
-      // Tunggu lebih lama sampai benar-benar terbuka
-      int retries = 0;
-      while (!_isDbOpen && retries < 15) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        retries++;
-        if (retries % 5 == 0) {
-          print('⏳ Waiting for DB connection... (${retries * 500}ms)');
-        }
-      }
-
-      if (!_isDbOpen) {
-        print('❌ Failed to reconnect after 15 retries (7.5s)');
-      } else {
-        print('✅ Reconnection successful!');
-      }
     }
 
-    if (_isDbOpen) {
-      users = db.collection('users');
-      userDetails = db.collection('user_details');
-      cvs = db.collection('cvs');
-    } else {
-      print('⚠️ WARNING: MongoDB still not connected. Will use cache fallback.');
+    if (!_isDbOpen) {
+      print('⚠️ WARNING: MongoDB still not open. Will use cache fallback.');
+      return false;
     }
+
+    users = db.collection('users');
+    userDetails = db.collection('user_details');
+    cvs = db.collection('cvs');
+    gestureLogs = db.collection('gesture_logs');
+
+    final bool live = await verifyConnected();
+    if (live) return true;
+
+    print('⚠️ DB state is open but connection is not live. Reconnecting...');
+    await forceReconnect();
+
+    return await verifyConnected();
   }
 
   static Future<void> tryReconnect() async {
@@ -380,6 +443,24 @@ class MongoService {
     }
 
     return candidates.toList();
+  }
+
+  static Future<bool> syncGestureData(List<Map<String, dynamic>> dataList) async {
+    try {
+      await ensureConnected();
+      final isLive = await verifyConnected();
+      if (!isLive) {
+        print('⚠️ syncGestureData: DB not live.');
+        return false;
+      }
+
+      await gestureLogs.insertAll(dataList);
+      print('✅ Successfully synced ${dataList.length} gesture logs to MongoDB');
+      return true;
+    } catch (e) {
+      print('❌ Error syncing gesture logs: $e');
+      return false;
+    }
   }
 
   /// Sanitize map untuk disimpan ke Hive/pending sync queue
@@ -752,6 +833,55 @@ class MongoService {
       return existing != null;
     } catch (e) {
       print('Gagal mengecek lamaran: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> submitJobApplicationOnlineOnly(
+    Map<String, dynamic> applicationData,
+  ) async {
+    try {
+      final isLive = await ensureConnected();
+      if (!isLive) {
+        print('⚠️ submitJobApplicationOnlineOnly: DB not live.');
+        return false;
+      }
+
+      final userId = applicationData['user_id'];
+      final jobId = applicationData['job_id'];
+
+      if (userId == null || jobId == null) {
+        print('DEBUG: userId or jobId is null');
+        return false;
+      }
+
+      final uId = _tryParseObjectId(userId) ?? userId;
+      final jId = _tryParseObjectId(jobId) ?? jobId;
+
+      final alreadyApplied = await hasAppliedJob(
+        userId: uId,
+        jobId: jId,
+      );
+
+      if (alreadyApplied) {
+        print('DEBUG: User already applied to this job');
+        return false;
+      }
+
+      final finalAppData = Map<String, dynamic>.from(applicationData);
+      finalAppData.remove('_id'); // Mongo will generate a new one
+      finalAppData['user_id'] = uId;
+      finalAppData['job_id'] = jId;
+      finalAppData['created_at'] =
+          finalAppData['created_at'] ?? DateTime.now().toUtc();
+      finalAppData['status'] = finalAppData['status'] ?? 'pending';
+
+      final result = await _jobApplicationsCollection.insertOne(finalAppData);
+      print('✅ Application synced to server with ID: ${result.id}');
+
+      return true;
+    } catch (e) {
+      print('❌ submitJobApplicationOnlineOnly failed: $e');
       return false;
     }
   }
