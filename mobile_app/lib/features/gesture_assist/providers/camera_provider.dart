@@ -17,6 +17,9 @@ class CameraProvider extends ChangeNotifier {
   String? _detectedGesture;
   String? _lastAction;
 
+  // Debug dummy gesture state
+  String _debugGestureType = 'open_palm';
+
   bool get isInitialized => _isInitialized;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -26,8 +29,23 @@ class CameraProvider extends ChangeNotifier {
   List<HandLandmark> get landmarks => _landmarks;
   String? get detectedGesture => _detectedGesture;
   String? get lastAction => _lastAction;
+  String get debugGestureType => _debugGestureType;
 
-  // For testing UI: Generates dummy hand points
+  /// Mengganti mode dummy gesture untuk testing:
+  /// open_palm, fist, thumbs_up.
+  void setDebugGestureType(String gestureType) {
+    _debugGestureType = gestureType;
+    _detectionService.setDebugGestureType(gestureType);
+
+    // Reset label sebentar agar user tahu mode berubah.
+    _detectedGesture = null;
+    _lastAction = null;
+
+    notifyListeners();
+  }
+
+  // For testing UI: Generates dummy hand points manual tanpa camera stream.
+  // Ini tetap dipertahankan agar tombol test lama tidak merusak flow.
   void showDummyHand() {
     _landmarks = [
       HandLandmark.dummy(0.5, 0.7), // Wrist
@@ -43,13 +61,14 @@ class CameraProvider extends ChangeNotifier {
   void clearDummyHand() {
     _landmarks = [];
     _detectedGesture = null;
+    _lastAction = null;
     notifyListeners();
   }
 
   // Integrasi dengan Detection Pipeline
   Future<void> _onImageStream(CameraImage image) async {
     final result = await _detectionService.processImage(image);
-    
+
     if (result != null) {
       _landmarks = result.landmarks;
       _detectedGesture = result.gestureType;
