@@ -8,16 +8,22 @@ import '../models/gesture_result_model.dart';
 import '../models/hand_landmark_model.dart';
 import '../utils/image_preprocessor.dart';
 import '../utils/gesture_cooldown_helper.dart';
+import '../utils/gesture_stability_helper.dart';
 import 'gesture_log_local_service.dart';
 import 'gesture_classifier_service.dart';
 import '../models/gesture_log_model.dart';
+import '../controllers/gesture_action_controller.dart';
 import '../../../services/offline_service.dart';
 
 class GestureDetectionService {
   final GestureCooldownHelper _cooldown =
       GestureCooldownHelper(cooldownMs: 1000);
+  final GestureStabilityHelper _stabilityHelper =
+      GestureStabilityHelper(requiredStableFrames: 5);
   final GestureLogLocalService _localLogService = GestureLogLocalService();
   final GestureClassifierService _classifier = GestureClassifierService();
+
+  GestureActionController? actionController;
 
   bool _isProcessing = false;
 
@@ -110,17 +116,26 @@ class GestureDetectionService {
           if (realLandmarks.length == 21) {
             final result = _classifier.classify(realLandmarks);
 
-            // History hanya menyimpan gesture valid:
-            // open_palm, fist, thumbs_up.
-            // unknown, no_hand, none, real_hand_detected tidak disimpan.
-            if (_cooldown.canTrigger() && _shouldLogGesture(result)) {
+            // LOGIKA STABILITAS
+            final isStable = _stabilityHelper.processStability(result);
+
+            // History & Action hanya menggunakan gesture yang sudah stabil
+            if (isStable && _cooldown.canTrigger() && _shouldLogGesture(result)) {
               _cooldown.updateLastTrigger();
               await _saveGestureLog(result);
               _updateLastLoggedGesture(result);
+              
+              debugPrint('🔥 STABLE GESTURE DETECTED: ${result.gestureType}');
+
+              // Eksekusi aksi nyata via controller
+              actionController?.handleAction(result);
             }
 
             return result;
           }
+
+          // Jika tangan tidak terdeteksi (length != 21), reset stability
+          _stabilityHelper.reset();
 
           // PENTING:
           // Kalau AI aktif tapi tidak menemukan tangan,
@@ -156,7 +171,10 @@ class GestureDetectionService {
         landmarks: mockLandmarks,
       );
 
-      if (_cooldown.canTrigger() && _shouldLogGesture(result)) {
+      // LOGIKA STABILITAS (Untuk Fallback Dummy)
+      final isStable = _stabilityHelper.processStability(result);
+
+      if (isStable && _cooldown.canTrigger() && _shouldLogGesture(result)) {
         _cooldown.updateLastTrigger();
 
         await _saveGestureLog(result);
@@ -224,8 +242,6 @@ class GestureDetectionService {
   }
 
   bool _shouldLogGesture(GestureResultModel result) {
-    final now = DateTime.now();
-
     const validGestures = {
       'open_palm',
       'fist',
@@ -233,24 +249,11 @@ class GestureDetectionService {
     };
 
     // Hanya gesture valid yang boleh masuk history.
-    // no_hand, unknown, none, real_hand_detected tidak disimpan.
     if (!validGestures.contains(result.gestureType)) {
       return false;
     }
 
-    // Gesture pertama selalu disimpan.
-    if (_lastLoggedGestureType == null || _lastLoggedAt == null) {
-      return true;
-    }
-
-    // Kalau gesture berubah, langsung simpan.
-    if (_lastLoggedGestureType != result.gestureType) {
-      return true;
-    }
-
-    // Kalau gesture sama, simpan ulang hanya setelah jeda tertentu.
-    final elapsedMs = now.difference(_lastLoggedAt!).inMilliseconds;
-    return elapsedMs >= _sameGestureRelogDelayMs;
+    return true; // Logging dipicu oleh stabilitas & cooldown di processImage
   }
 
   void _updateLastLoggedGesture(GestureResultModel result) {

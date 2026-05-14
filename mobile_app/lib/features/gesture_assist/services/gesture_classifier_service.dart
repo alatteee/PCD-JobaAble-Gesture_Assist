@@ -29,9 +29,11 @@ class GestureClassifierService {
     );
 
     // PENTING:
-    // Thumbs up dicek paling awal karena bentuknya mirip fist:
-    // 4 jari terlipat, hanya thumb yang extended.
-    if (thumbsUpScore >= 0.80) {
+    // Thumbs up dan Fist sangat mirip (4 jari terlipat).
+    // Kita harus memastikan pemenang skor tertinggi yang diambil.
+    
+    // 1. Cek Thumbs Up (Harus jauh lebih tinggi dari Fist)
+    if (thumbsUpScore >= 0.85 && thumbsUpScore > fistScore) {
       return GestureResultModel(
         gestureType: 'thumbs_up',
         action: 'confirm',
@@ -41,7 +43,8 @@ class GestureClassifierService {
       );
     }
 
-    if (openPalmScore >= 0.75 && openPalmScore > fistScore) {
+    // 2. Cek Open Palm
+    if (openPalmScore >= 0.75 && openPalmScore > fistScore && openPalmScore > thumbsUpScore) {
       return GestureResultModel(
         gestureType: 'open_palm',
         action: 'next',
@@ -51,7 +54,8 @@ class GestureClassifierService {
       );
     }
 
-    if (fistScore >= 0.75) {
+    // 3. Cek Fist (Hanya jika skornya dominan)
+    if (fistScore >= 0.80 && fistScore > thumbsUpScore) {
       return GestureResultModel(
         gestureType: 'fist',
         action: 'back',
@@ -60,6 +64,7 @@ class GestureClassifierService {
         timestamp: DateTime.now(),
       );
     }
+
 
     return GestureResultModel.unknown(landmarks);
   }
@@ -140,7 +145,7 @@ class GestureClassifierService {
 
     // Kalau jari selain thumb belum benar-benar folded,
     // jangan dianggap thumbs up.
-    if (foldedCount < 3) {
+    if (foldedCount < 4) {
       return 0.0;
     }
 
@@ -164,19 +169,19 @@ class GestureClassifierService {
     // Syarat baru:
     // Pada thumbs up asli, ujung thumb biasanya jadi titik paling dominan/jauh.
     // Pada fist, thumb sering terlihat terbuka sedikit, tapi tidak dominan jauh.
-    final thumbClearlyExtended = thumbLength > thumbBaseLength * 1.45;
-    final thumbLongEnough = thumbLength > palm * 0.75;
+    final thumbClearlyExtended = thumbLength > thumbBaseLength * 1.80; // Naik lagi dari 1.65
+    final thumbLongEnough = thumbLength > palm * 1.0; // Naik lagi dari 0.90
     final thumbFarFromPalm =
-        _distance(thumbTip, middleMcp) > palm * 1.05 ||
-        _distance(thumbTip, indexMcp) > palm * 0.95;
+        _distance(thumbTip, middleMcp) > palm * 1.40 || // Naik lagi dari 1.25
+        _distance(thumbTip, indexMcp) > palm * 1.30; // Naik lagi dari 1.15
 
     final thumbDominatesOtherFingers =
-        thumbTipToWrist > avgOtherTipToWrist * 1.10 &&
-        thumbTipToWrist >= maxOtherTipToWrist * 0.95;
+        thumbTipToWrist > avgOtherTipToWrist * 1.40 && // Naik lagi dari 1.30
+        thumbTipToWrist >= maxOtherTipToWrist * 1.20; // Naik lagi dari 1.10
 
     // Bonus visual, bukan syarat utama.
     final thumbVisuallyHigher =
-        thumbTip.y < indexMcp.y || thumbTip.y < middleMcp.y;
+        thumbTip.y < indexMcp.y && thumbTip.y < middleMcp.y; // Harus < keduanya (&&), bukan ||
 
     double score = 0.0;
 
