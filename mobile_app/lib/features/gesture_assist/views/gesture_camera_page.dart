@@ -4,6 +4,7 @@ import '../../../core/constants/app_colors.dart';
 import '../providers/camera_provider.dart';
 import '../widgets/camera_preview_widget.dart';
 import '../widgets/hand_overlay_widget.dart';
+import '../controllers/gesture_action_controller.dart';
 
 class GestureCameraPage extends StatefulWidget {
   const GestureCameraPage({super.key});
@@ -13,13 +14,20 @@ class GestureCameraPage extends StatefulWidget {
 }
 
 class _GestureCameraPageState extends State<GestureCameraPage> {
+  late GestureActionController _actionController;
+
   @override
   void initState() {
     super.initState();
+    _actionController = GestureActionController(context);
 
     // Initialize camera on start
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CameraProvider>().initializeCamera();
+      final provider = context.read<CameraProvider>();
+      provider.initializeCamera();
+      
+      // Pasang action controller ke provider agar bisa eksekusi aksi navigasi
+      provider.setActionController(_actionController);
     });
   }
 

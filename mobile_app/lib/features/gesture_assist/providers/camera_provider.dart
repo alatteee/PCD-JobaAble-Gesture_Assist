@@ -1,17 +1,22 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 
 import '../services/camera_service.dart';
 import '../models/hand_landmark_model.dart';
 import '../services/gesture_detection_service.dart';
+import '../controllers/gesture_action_controller.dart';
 
 class CameraProvider extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
   final GestureDetectionService _detectionService = GestureDetectionService();
+  
+  GestureActionController? _actionController;
 
   bool _isInitialized = false;
   bool _isLoading = false;
   String? _errorMessage;
+
+  // ... rest of state ...
 
   // Detection UI states
   List<HandLandmark> _landmarks = [];
@@ -43,6 +48,11 @@ class CameraProvider extends ChangeNotifier {
     _lastAction = null;
 
     notifyListeners();
+  }
+
+  /// Menghubungkan detection service ke action controller yang butuh context.
+  void setActionController(GestureActionController controller) {
+    _detectionService.actionController = controller;
   }
 
   // For testing UI: Generates dummy hand points manual tanpa camera stream.
