@@ -85,44 +85,24 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
               // 2. Hand Landmark Overlay
               HandOverlayWidget(
                 landmarks: provider.landmarks,
-                gestureLabel: provider.detectedGesture,
+                gestureLabel: '',
               ),
 
-              // 3. Debug gesture selector
+              // 3. Real Gesture Status Overlay
               Positioned(
-                top: 110,
+                top: 105,
                 left: 16,
                 right: 16,
-                child: _DebugGestureSelector(provider: provider),
+                child: _GestureStatusCard(provider: provider),
               ),
 
-              // 4. UI Overlay
+              // 4. Bottom Control Overlay
               Positioned(
                 bottom: 40,
                 left: 0,
                 right: 0,
                 child: Column(
                   children: [
-                    if (provider.isStreaming)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 20),
-                        child: ElevatedButton.icon(
-                          onPressed: () => provider.clearDummyHand(),
-                          icon: const Icon(Icons.cleaning_services),
-                          label: const Text("Clear Test"),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                          ),
-                        ),
-                      ),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 24,
@@ -164,87 +144,125 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
   }
 }
 
-class _DebugGestureSelector extends StatelessWidget {
+class _GestureStatusCard extends StatelessWidget {
   final CameraProvider provider;
 
-  const _DebugGestureSelector({
+  const _GestureStatusCard({
     required this.provider,
   });
 
   @override
   Widget build(BuildContext context) {
+  final String gesture = provider.detectedGesture ?? 'none';
+  final action = _mapActionLabel(gesture);
+
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 18,
+        vertical: 14,
+      ),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.45),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.18),
+        ),
       ),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 8,
-        runSpacing: 8,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _GestureButton(
-            label: 'Open Palm',
-            value: 'open_palm',
-            selectedValue: provider.debugGestureType,
-            onSelected: provider.setDebugGestureType,
+          const Text(
+            'Real Gesture Detection',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          _GestureButton(
-            label: 'Fist',
-            value: 'fist',
-            selectedValue: provider.debugGestureType,
-            onSelected: provider.setDebugGestureType,
+          const SizedBox(height: 8),
+          Text(
+            _formatGestureLabel(gesture),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _gestureColor(gesture),
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-          _GestureButton(
-            label: 'Thumbs Up',
-            value: 'thumbs_up',
-            selectedValue: provider.debugGestureType,
-            onSelected: provider.setDebugGestureType,
+          const SizedBox(height: 6),
+          Text(
+            'Action: $action',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-class _GestureButton extends StatelessWidget {
-  final String label;
-  final String value;
-  final String selectedValue;
-  final ValueChanged<String> onSelected;
+  String _formatGestureLabel(String gesture) {
+    switch (gesture) {
+      case 'open_palm':
+        return 'Open Palm';
+      case 'fist':
+        return 'Fist';
+      case 'thumbs_up':
+        return 'Thumbs Up';
+      case 'unknown':
+        return 'Unknown Gesture';
+      case 'no_hand':
+        return 'No Hand Detected';
+      case 'none':
+        return 'No Gesture';
+      default:
+        if (gesture.isEmpty) return 'No Gesture';
+        return gesture
+            .replaceAll('_', ' ')
+            .split(' ')
+            .map((word) {
+              if (word.isEmpty) return word;
+              return word[0].toUpperCase() + word.substring(1);
+            })
+            .join(' ');
+    }
+  }
 
-  const _GestureButton({
-    required this.label,
-    required this.value,
-    required this.selectedValue,
-    required this.onSelected,
-  });
+  String _mapActionLabel(String gesture) {
+    switch (gesture) {
+      case 'open_palm':
+        return 'next';
+      case 'fist':
+        return 'back';
+      case 'thumbs_up':
+        return 'confirm';
+      case 'unknown':
+        return 'no_action';
+      case 'no_hand':
+        return 'waiting';
+      case 'none':
+        return 'none';
+      default:
+        return 'waiting';
+    }
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final bool isSelected = value == selectedValue;
-
-    return ElevatedButton(
-      onPressed: () => onSelected(value),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? Colors.green : Colors.white,
-        foregroundColor: isSelected ? Colors.white : Colors.black87,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 10,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 12,
-        ),
-      ),
-    );
+  Color _gestureColor(String gesture) {
+    switch (gesture) {
+      case 'open_palm':
+        return Colors.greenAccent;
+      case 'fist':
+        return Colors.orangeAccent;
+      case 'thumbs_up':
+        return Colors.lightBlueAccent;
+      case 'unknown':
+        return Colors.yellowAccent;
+      case 'no_hand':
+        return Colors.white70;
+      default:
+        return Colors.white;
+    }
   }
 }

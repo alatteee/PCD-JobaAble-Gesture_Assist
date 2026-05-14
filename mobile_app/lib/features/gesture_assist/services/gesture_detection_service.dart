@@ -9,6 +9,7 @@ import '../models/hand_landmark_model.dart';
 import '../utils/image_preprocessor.dart';
 import '../utils/gesture_cooldown_helper.dart';
 import 'gesture_log_local_service.dart';
+import 'gesture_classifier_service.dart';
 import '../models/gesture_log_model.dart';
 import '../../../services/offline_service.dart';
 
@@ -16,6 +17,7 @@ class GestureDetectionService {
   final GestureCooldownHelper _cooldown =
       GestureCooldownHelper(cooldownMs: 1000);
   final GestureLogLocalService _localLogService = GestureLogLocalService();
+  final GestureClassifierService _classifier = GestureClassifierService();
 
   bool _isProcessing = false;
 
@@ -82,7 +84,7 @@ class GestureDetectionService {
   /// Alur sekarang:
   /// CameraImage
   /// -> coba real hand landmark detection
-  /// -> kalau dapat 21 landmark, return result real_hand_detected
+  /// -> kalau dapat 21 landmark, klasifikasikan gesture real
   /// -> kalau AI aktif tapi tidak ada tangan, return no_hand + landmark kosong
   /// -> kalau AI gagal init / tidak aktif, fallback ke dummy landmark.
   Future<GestureResultModel?> processImage(
@@ -106,16 +108,11 @@ class GestureDetectionService {
           final realLandmarks = _convertMediaPipeLandmarks(hands);
 
           if (realLandmarks.length == 21) {
-            final result = GestureResultModel(
-              gestureType: 'real_hand_detected',
-              action: 'tracking',
-              confidence: 0.95,
-              landmarks: realLandmarks,
-              timestamp: DateTime.now(),
-            );
+            final result = _classifier.classify(realLandmarks);
 
-            // Untuk tahap awal, real_hand_detected boleh masuk history
-            // tapi tetap pakai anti-spam agar tidak memenuhi Hive.
+            // History hanya menyimpan gesture valid:
+            // open_palm, fist, thumbs_up.
+            // unknown, no_hand, none, real_hand_detected tidak disimpan.
             if (_cooldown.canTrigger() && _shouldLogGesture(result)) {
               _cooldown.updateLastTrigger();
               await _saveGestureLog(result);
@@ -130,25 +127,13 @@ class GestureDetectionService {
           // jangan fallback ke dummy.
           // Dummy lama dibuat dalam koordinat layar normal,
           // sedangkan overlay sekarang sudah ditransform untuk landmark real.
-          return GestureResultModel(
-            gestureType: 'no_hand',
-            action: 'waiting',
-            confidence: 0.0,
-            landmarks: [],
-            timestamp: DateTime.now(),
-          );
+          return GestureResultModel.noHand();
         } catch (e) {
           debugPrint('❌ Real hand detection failed: $e');
 
           // Kalau detect error sesaat, kosongkan overlay dulu.
           // Jangan tampilkan dummy supaya tidak terlihat miring/aneh.
-          return GestureResultModel(
-            gestureType: 'no_hand',
-            action: 'waiting',
-            confidence: 0.0,
-            landmarks: [],
-            timestamp: DateTime.now(),
-          );
+          return GestureResultModel.noHand();
         }
       }
 
@@ -171,15 +156,11 @@ class GestureDetectionService {
         landmarks: mockLandmarks,
       );
 
-      if (result.gestureType != 'none' &&
-          _cooldown.canTrigger() &&
-          _shouldLogGesture(result)) {
+      if (_cooldown.canTrigger() && _shouldLogGesture(result)) {
         _cooldown.updateLastTrigger();
 
         await _saveGestureLog(result);
         _updateLastLoggedGesture(result);
-
-        return result;
       }
 
       return result;
@@ -245,8 +226,15 @@ class GestureDetectionService {
   bool _shouldLogGesture(GestureResultModel result) {
     final now = DateTime.now();
 
-    // Jangan simpan no_hand ke history.
-    if (result.gestureType == 'no_hand') {
+    const validGestures = {
+      'open_palm',
+      'fist',
+      'thumbs_up',
+    };
+
+    // Hanya gesture valid yang boleh masuk history.
+    // no_hand, unknown, none, real_hand_detected tidak disimpan.
+    if (!validGestures.contains(result.gestureType)) {
       return false;
     }
 

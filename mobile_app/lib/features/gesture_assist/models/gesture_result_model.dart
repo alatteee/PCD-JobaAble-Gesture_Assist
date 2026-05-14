@@ -1,8 +1,8 @@
 import 'hand_landmark_model.dart';
 
 class GestureResultModel {
-  final String gestureType; // e.g., 'open_palm', 'fist', 'thumbs_up', 'none'
-  final String action;      // e.g., 'next', 'back', 'confirm', 'none'
+  final String gestureType; // open_palm, fist, thumbs_up, unknown, no_hand
+  final String action; // next, back, confirm, no_action, waiting
   final double confidence;
   final List<HandLandmark> landmarks;
   final DateTime timestamp;
@@ -19,6 +19,26 @@ class GestureResultModel {
     return GestureResultModel(
       gestureType: 'none',
       action: 'none',
+      confidence: 0.0,
+      landmarks: [],
+      timestamp: DateTime.now(),
+    );
+  }
+
+  factory GestureResultModel.unknown(List<HandLandmark> landmarks) {
+    return GestureResultModel(
+      gestureType: 'unknown',
+      action: 'no_action',
+      confidence: 0.0,
+      landmarks: landmarks,
+      timestamp: DateTime.now(),
+    );
+  }
+
+  factory GestureResultModel.noHand() {
+    return GestureResultModel(
+      gestureType: 'no_hand',
+      action: 'waiting',
       confidence: 0.0,
       landmarks: [],
       timestamp: DateTime.now(),
