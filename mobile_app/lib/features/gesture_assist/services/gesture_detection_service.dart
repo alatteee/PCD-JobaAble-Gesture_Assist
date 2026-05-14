@@ -19,7 +19,7 @@ class GestureDetectionService {
   final GestureCooldownHelper _cooldown =
       GestureCooldownHelper(cooldownMs: 1000);
   final GestureStabilityHelper _stabilityHelper =
-      GestureStabilityHelper(requiredStableFrames: 5);
+      GestureStabilityHelper(requiredStableFrames: 10); // Naik dari 5 untuk stabilitas lebih tinggi
   final GestureLogLocalService _localLogService = GestureLogLocalService();
   final GestureClassifierService _classifier = GestureClassifierService();
 

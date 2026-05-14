@@ -30,17 +30,27 @@ class GestureClassifierService {
 
     // PENTING:
     // Thumbs up dan Fist sangat mirip (4 jari terlipat).
-    // Kita harus memastikan pemenang skor tertinggi yang diambil.
+    // Kita harus memastikan pemenang skor tertinggi yang diambil dengan kombinasi scoring + angle.
+    // Gunakan scoring untuk determinasi gesture dengan presisi tinggi.
     
-    // 1. Cek Thumbs Up (Harus jauh lebih tinggi dari Fist)
-    if (thumbsUpScore >= 0.85 && thumbsUpScore > fistScore) {
-      return GestureResultModel(
-        gestureType: 'thumbs_up',
-        action: 'confirm',
-        confidence: thumbsUpScore,
-        landmarks: landmarks,
-        timestamp: DateTime.now(),
-      );
+    // DEBUG: Log semua scores untuk tuning
+    if (kDebugMode) {
+      print('[CLASSIFY DEBUG] open=$openPalmScore fist=$fistScore thumb=$thumbsUpScore');
+    }
+    
+    // 1. Cek Thumbs Up (Score >= 0.65 dengan validasi angle dan dominasi fist)
+    // Lowered threshold dari 0.80 karena natural thumbs up mungkin tidak sekuat forced position
+    if (thumbsUpScore >= 0.65 && thumbsUpScore > fistScore) {
+      // Tambahan: validasi sudut jempol untuk memastikan truly upright
+      if (_validateThumbAngle(landmarks)) {
+        return GestureResultModel(
+          gestureType: 'thumbs_up',
+          action: 'confirm',
+          confidence: thumbsUpScore,
+          landmarks: landmarks,
+          timestamp: DateTime.now(),
+        );
+      }
     }
 
     // 2. Cek Open Palm
@@ -54,8 +64,8 @@ class GestureClassifierService {
       );
     }
 
-    // 3. Cek Fist (Hanya jika skornya dominan)
-    if (fistScore >= 0.80 && fistScore > thumbsUpScore) {
+    // 3. Cek Fist (Hanya jika skornya dominan dan Thumbs Up gagal)
+    if (fistScore >= 0.85 && fistScore > thumbsUpScore) {
       return GestureResultModel(
         gestureType: 'fist',
         action: 'back',
@@ -166,32 +176,39 @@ class GestureClassifierService {
 
     final maxOtherTipToWrist = otherTipToWrist.reduce(max);
 
-    // Syarat baru:
-    // Pada thumbs up asli, ujung thumb biasanya jadi titik paling dominan/jauh.
-    // Pada fist, thumb sering terlihat terbuka sedikit, tapi tidak dominan jauh.
-    final thumbClearlyExtended = thumbLength > thumbBaseLength * 1.80; // Naik lagi dari 1.65
-    final thumbLongEnough = thumbLength > palm * 1.0; // Naik lagi dari 0.90
+    final thumbClearlyExtended = thumbLength > thumbBaseLength * 1.65; // dari 1.80
+    final thumbLongEnough = thumbLength > palm * 0.90; // dari 1.0
     final thumbFarFromPalm =
-        _distance(thumbTip, middleMcp) > palm * 1.40 || // Naik lagi dari 1.25
-        _distance(thumbTip, indexMcp) > palm * 1.30; // Naik lagi dari 1.15
+        _distance(thumbTip, middleMcp) > palm * 1.30 || // dari 1.40
+        _distance(thumbTip, indexMcp) > palm * 1.20; // dari 1.30
 
     final thumbDominatesOtherFingers =
-        thumbTipToWrist > avgOtherTipToWrist * 1.40 && // Naik lagi dari 1.30
-        thumbTipToWrist >= maxOtherTipToWrist * 1.20; // Naik lagi dari 1.10
+        thumbTipToWrist > avgOtherTipToWrist * 1.30 && // dari 1.40
+        thumbTipToWrist >= maxOtherTipToWrist * 1.10; // dari 1.20
+
+    // Cek sudut jempol: jempol harus "tegak" relatif terhadap telapak tangan.
+    // Ini membantu membedakan thumbs up asli dari thumb yang hanya "nyempil" di fist.
+    final thumbAngleFromPalm = _calculateThumbAngle(l);
+    final thumbUprightAngle = 
+        (thumbAngleFromPalm >= 60 && thumbAngleFromPalm <= 120) || 
+        (thumbAngleFromPalm >= 240 && thumbAngleFromPalm <= 300) ||
+        (thumbAngleFromPalm >= 150 && thumbAngleFromPalm <= 210); // tambah range untuk accommodate variasi
 
     // Bonus visual, bukan syarat utama.
     final thumbVisuallyHigher =
-        thumbTip.y < indexMcp.y && thumbTip.y < middleMcp.y; // Harus < keduanya (&&), bukan ||
+        thumbTip.y < indexMcp.y && thumbTip.y < middleMcp.y;
 
     double score = 0.0;
 
-    score += (foldedCount / 4.0) * 0.35;
+    score += (foldedCount / 4.0) * 0.30; // Sedikit diturunkan karena ada bonus angle
 
     if (thumbClearlyExtended) score += 0.25;
     if (thumbLongEnough) score += 0.15;
     if (thumbFarFromPalm) score += 0.15;
     if (thumbDominatesOtherFingers) score += 0.20;
     if (thumbVisuallyHigher) score += 0.05;
+    // Tambahan: angle check memberikan bonus signifikan karena sangat distinguish
+    if (thumbUprightAngle) score += 0.15;
 
     return score.clamp(0.0, 1.0);
   }
@@ -268,5 +285,70 @@ class GestureClassifierService {
 
     // Safety supaya threshold tidak terlalu kecil.
     return max(size, 0.05);
+  }
+
+  /// Menghitung sudut jempol relatif terhadap telapak tangan.
+  /// Nilai 0-360 derajat. Untuk thumbs up, sudut biasanya perpendikuler atau tidak sejajar dengan palm.
+  double _calculateThumbAngle(List<HandLandmark> l) {
+    final wrist = l[0];
+    final thumbTip = l[4];
+    final middleMcp = l[9];
+
+    // Vector dari wrist ke thumbTip (arah jempol)
+    final thumbVecX = thumbTip.x - wrist.x;
+    final thumbVecY = thumbTip.y - wrist.y;
+
+    // Vector dari wrist ke middle MCP (arah telapak/center)
+    final palmVecX = middleMcp.x - wrist.x;
+    final palmVecY = middleMcp.y - wrist.y;
+
+    // Hitung sudut menggunakan atan2
+    final palmAngle = atan2(palmVecY, palmVecX) * 180 / pi;
+    final thumbAngle = atan2(thumbVecY, thumbVecX) * 180 / pi;
+
+    var angleDiff = (thumbAngle - palmAngle) % 360;
+    if (angleDiff < 0) {
+      angleDiff += 360;
+    }
+
+    // DEBUG: Log angle calculation untuk tuning
+    if (kDebugMode) {
+      print('[ANGLE] palmDir=$palmAngle° thumbDir=$thumbAngle° diff=$angleDiff°');
+    }
+
+    return angleDiff;
+  }
+
+  /// Validasi bahwa jempol berada dalam posisi "tegak" (upright).
+  /// Lebih lenient untuk accommodate berbagai hand orientations.
+  bool _validateThumbAngle(List<HandLandmark> landmarks) {
+    if (landmarks.length < 21) return false;
+    
+    final angle = _calculateThumbAngle(landmarks);
+    
+    // Thumbs up characteristics:
+    // - Thumb points AWAY dari palm center (angle ~90-270 range)
+    // - NOT parallel dengan palm direction (not near 0° atau 180°)
+    
+    // Definisi: angle is "perpendicular-ish" jika NOT nearly parallel
+    final isNearlyParallel = 
+        (angle >= 350 || angle <= 10) ||  // 0° ± 10
+        (angle >= 170 && angle <= 190);   // 180° ± 10
+    
+    // Thumbs up ketika angle is perpendicular-ish (bukan sejajar dengan palm)
+    final isPerpendicularish = !isNearlyParallel;
+    
+    // Tambahan: check jika thumb tip lebih jauh dari palm center
+    // Ini memastikan thumb truly extended, bukan hanya "angled"
+    final wrist = landmarks[0];
+    final thumbTip = landmarks[4];
+    final middleMcp = landmarks[9];
+    
+    final thumbDistFromWrist = _distance(thumbTip, wrist);
+    final palmScaleFromWrist = _distance(middleMcp, wrist);
+    
+    final thumbIsLong = thumbDistFromWrist > palmScaleFromWrist * 1.1;
+    
+    return isPerpendicularish && thumbIsLong;
   }
 }
