@@ -1,5 +1,9 @@
 import 'dart:async';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
+import 'package:hand_landmarker/hand_landmarker.dart' as mp;
+
 import '../models/gesture_result_model.dart';
 import '../models/hand_landmark_model.dart';
 import '../utils/image_preprocessor.dart';
@@ -15,7 +19,16 @@ class GestureDetectionService {
 
   bool _isProcessing = false;
 
-  /// Mode dummy gesture untuk tahap testing sebelum AI asli.
+  /// Plugin real hand landmark detection.
+  /// Package hand_landmarker memakai MediaPipe Hand Landmarker di Android.
+  mp.HandLandmarkerPlugin? _handLandmarker;
+
+  /// Kalau true, service akan mencoba membaca landmark tangan asli.
+  /// Kalau AI aktif tapi tidak ada tangan, overlay akan dikosongkan.
+  /// Dummy hanya dipakai kalau real detector gagal init / tidak aktif.
+  bool _useRealDetection = true;
+
+  /// Mode dummy gesture untuk tahap testing/fallback.
   /// Nilai yang didukung:
   /// - open_palm
   /// - fist
@@ -34,6 +47,26 @@ class GestureDetectionService {
 
   String get debugGestureType => _debugGestureType;
 
+  /// Panggil ini setelah camera berhasil initialize.
+  /// Jangan dibuat async karena API HandLandmarkerPlugin.create() synchronous.
+  void initializeRealDetector() {
+    if (_handLandmarker != null) return;
+
+    try {
+      _handLandmarker = mp.HandLandmarkerPlugin.create(
+        numHands: 1,
+        minHandDetectionConfidence: 0.7,
+        delegate: mp.HandLandmarkerDelegate.gpu,
+      );
+
+      _useRealDetection = true;
+      debugPrint('✅ HandLandmarker initialized');
+    } catch (e) {
+      _useRealDetection = false;
+      debugPrint('❌ Failed to initialize HandLandmarker: $e');
+    }
+  }
+
   void setDebugGestureType(String gestureType) {
     const allowedGestures = ['open_palm', 'fist', 'thumbs_up'];
 
@@ -45,33 +78,99 @@ class GestureDetectionService {
   }
 
   /// Main entry point untuk detection pipeline.
-  /// Saat ini masih dummy/debug mode:
-  /// CameraImage -> Preprocessing placeholder -> Dummy Landmark -> Debug Result.
   ///
-  /// Nanti saat sudah pakai AI asli:
-  /// CameraImage -> Preprocessing -> Real Hand Detection -> Classifier.
-  Future<GestureResultModel?> processImage(CameraImage image) async {
+  /// Alur sekarang:
+  /// CameraImage
+  /// -> coba real hand landmark detection
+  /// -> kalau dapat 21 landmark, return result real_hand_detected
+  /// -> kalau AI aktif tapi tidak ada tangan, return no_hand + landmark kosong
+  /// -> kalau AI gagal init / tidak aktif, fallback ke dummy landmark.
+  Future<GestureResultModel?> processImage(
+    CameraImage image, {
+    int sensorOrientation = 90,
+  }) async {
     if (_isProcessing) return null;
     _isProcessing = true;
 
     try {
-      // 1. Preprocessing placeholder.
-      // Untuk sekarang belum dipakai, tapi tetap dipanggil agar pipeline PCD sudah siap.
+      // ============================================================
+      // 1. REAL HAND LANDMARK DETECTION
+      // ============================================================
+      if (_useRealDetection && _handLandmarker != null) {
+        try {
+          final hands = _handLandmarker!.detect(
+            image,
+            sensorOrientation,
+          );
+
+          final realLandmarks = _convertMediaPipeLandmarks(hands);
+
+          if (realLandmarks.length == 21) {
+            final result = GestureResultModel(
+              gestureType: 'real_hand_detected',
+              action: 'tracking',
+              confidence: 0.95,
+              landmarks: realLandmarks,
+              timestamp: DateTime.now(),
+            );
+
+            // Untuk tahap awal, real_hand_detected boleh masuk history
+            // tapi tetap pakai anti-spam agar tidak memenuhi Hive.
+            if (_cooldown.canTrigger() && _shouldLogGesture(result)) {
+              _cooldown.updateLastTrigger();
+              await _saveGestureLog(result);
+              _updateLastLoggedGesture(result);
+            }
+
+            return result;
+          }
+
+          // PENTING:
+          // Kalau AI aktif tapi tidak menemukan tangan,
+          // jangan fallback ke dummy.
+          // Dummy lama dibuat dalam koordinat layar normal,
+          // sedangkan overlay sekarang sudah ditransform untuk landmark real.
+          return GestureResultModel(
+            gestureType: 'no_hand',
+            action: 'waiting',
+            confidence: 0.0,
+            landmarks: [],
+            timestamp: DateTime.now(),
+          );
+        } catch (e) {
+          debugPrint('❌ Real hand detection failed: $e');
+
+          // Kalau detect error sesaat, kosongkan overlay dulu.
+          // Jangan tampilkan dummy supaya tidak terlihat miring/aneh.
+          return GestureResultModel(
+            gestureType: 'no_hand',
+            action: 'waiting',
+            confidence: 0.0,
+            landmarks: [],
+            timestamp: DateTime.now(),
+          );
+        }
+      }
+
+      // ============================================================
+      // 2. FALLBACK DUMMY PIPELINE
+      // ============================================================
+      // Bagian ini hanya jalan kalau real detector belum aktif / gagal init.
+      // Dummy tetap dipertahankan agar fitur debug lama tidak hilang.
+
+      // Preprocessing placeholder.
+      // Untuk sekarang belum dipakai, tapi tetap dipanggil agar pipeline PCD
+      // kamu tetap terlihat siap untuk pengembangan TFLite/manual preprocessing.
       // ignore: unused_local_variable
       final inputData = await ImagePreprocessor.preprocessCameraImage(image);
 
-      // 2. Dummy landmark sesuai tombol debug yang dipilih.
       final mockLandmarks = _generateMockLandmarks(_debugGestureType);
 
-      // 3. Debug result.
-      // Untuk mode dummy/testing, hasil gesture dibuat langsung sesuai tombol debug.
-      // Ini mencegah dummy "fist" salah terbaca sebagai open_palm oleh heuristic classifier.
       final result = _buildDebugGestureResult(
         gestureType: _debugGestureType,
         landmarks: mockLandmarks,
       );
 
-      // 4. Logging ke Hive dengan cooldown + anti-spam.
       if (result.gestureType != 'none' &&
           _cooldown.canTrigger() &&
           _shouldLogGesture(result)) {
@@ -85,11 +184,27 @@ class GestureDetectionService {
 
       return result;
     } catch (e) {
-      print('❌ Error in GestureDetectionService: $e');
+      debugPrint('❌ Error in GestureDetectionService: $e');
       return null;
     } finally {
       _isProcessing = false;
     }
+  }
+
+  /// Convert output package hand_landmarker menjadi model HandLandmark milik project.
+  /// Package mengembalikan List<Hand>, tiap Hand punya 21 landmark.
+  List<HandLandmark> _convertMediaPipeLandmarks(List<mp.Hand> hands) {
+    if (hands.isEmpty) return [];
+
+    final firstHand = hands.first;
+
+    return firstHand.landmarks.map((landmark) {
+      return HandLandmark(
+        x: landmark.x.clamp(0.0, 1.0),
+        y: landmark.y.clamp(0.0, 1.0),
+        confidence: 0.95,
+      );
+    }).toList();
   }
 
   GestureResultModel _buildDebugGestureResult({
@@ -130,6 +245,11 @@ class GestureDetectionService {
   bool _shouldLogGesture(GestureResultModel result) {
     final now = DateTime.now();
 
+    // Jangan simpan no_hand ke history.
+    if (result.gestureType == 'no_hand') {
+      return false;
+    }
+
     // Gesture pertama selalu disimpan.
     if (_lastLoggedGestureType == null || _lastLoggedAt == null) {
       return true;
@@ -168,7 +288,7 @@ class GestureDetectionService {
   }
 
   /// Placeholder untuk output landmark detection asli.
-  /// Untuk sekarang masih dummy agar overlay, logging, dan history bisa dites.
+  /// Untuk sekarang tetap dipertahankan sebagai fallback/debug.
   List<HandLandmark> _generateMockLandmarks(String gestureType) {
     switch (gestureType) {
       case 'fist':
@@ -298,5 +418,15 @@ class GestureDetectionService {
       _point(0.63, 0.61),
       _point(0.62, 0.64), // 20 pinky tip rendah/lipat
     ];
+  }
+
+  void dispose() {
+    try {
+      _handLandmarker?.dispose();
+      _handLandmarker = null;
+      debugPrint('✅ HandLandmarker disposed');
+    } catch (e) {
+      debugPrint('❌ Failed to dispose HandLandmarker: $e');
+    }
   }
 }

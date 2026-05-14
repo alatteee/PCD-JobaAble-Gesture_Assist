@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
+
 import '../services/camera_service.dart';
 import '../models/hand_landmark_model.dart';
 import '../services/gesture_detection_service.dart';
@@ -67,7 +68,15 @@ class CameraProvider extends ChangeNotifier {
 
   // Integrasi dengan Detection Pipeline
   Future<void> _onImageStream(CameraImage image) async {
-    final result = await _detectionService.processImage(image);
+    final controller = _cameraService.controller;
+
+    final sensorOrientation =
+        controller?.description.sensorOrientation ?? 90;
+
+    final result = await _detectionService.processImage(
+      image,
+      sensorOrientation: 90,
+    );
 
     if (result != null) {
       _landmarks = result.landmarks;
@@ -84,9 +93,14 @@ class CameraProvider extends ChangeNotifier {
 
     try {
       await _cameraService.initialize();
+
+      // Initialize real MediaPipe hand landmark detector setelah camera siap.
+      _detectionService.initializeRealDetector();
+
       _isInitialized = true;
     } catch (e) {
       _errorMessage = e.toString();
+      debugPrint('❌ CameraProvider initializeCamera error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -105,6 +119,7 @@ class CameraProvider extends ChangeNotifier {
   @override
   void dispose() {
     _cameraService.dispose();
+    _detectionService.dispose();
     super.dispose();
   }
 }

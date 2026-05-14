@@ -14,7 +14,7 @@ class CameraPreviewWidget extends StatelessWidget {
 
     final size = MediaQuery.of(context).size;
     var scale = size.aspectRatio * controller.value.aspectRatio;
-    
+
     // Invert scale if scale < 1.0 (to cover the screen)
     if (scale < 1) scale = 1 / scale;
 
