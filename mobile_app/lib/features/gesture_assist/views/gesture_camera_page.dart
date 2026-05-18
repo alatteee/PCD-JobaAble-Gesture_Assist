@@ -41,6 +41,40 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
       );
     });
 
+    // ============================================================
+    // REGISTER GESTURE ACTION CALLBACKS
+    // ============================================================
+
+    // CONFIRM ACTION (Thumbs Up)
+    _navigationController.registerConfirmAction(() async {
+      debugPrint('✅ [GestureCamera] CONFIRM action triggered (Thumbs Up)');
+      // TODO: Implement confirm action untuk page ini
+      // Misalnya: submit form, apply untuk job, dll
+      // For now, just return true (success)
+      return true;
+    });
+
+    // NEXT ACTION (Open Palm)
+    _navigationController.registerNextAction(() async {
+      debugPrint('👉 [GestureCamera] NEXT action triggered (Open Palm)');
+      // TODO: Implement next action untuk page ini
+      // Misalnya: scroll ke bawah, navigate ke job berikutnya, dll
+      // For now, just return true (success)
+      return true;
+    });
+
+    // BACK ACTION (Fist)
+    _navigationController.registerBackAction(() async {
+      debugPrint('👈 [GestureCamera] BACK action triggered (Fist)');
+      // Try to pop navigator, if possible
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+        return true;
+      }
+      // If can't pop, stay on this page
+      return false;
+    });
+
     // Initialize camera on start
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<CameraProvider>();
