@@ -4,24 +4,29 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hand_landmarker/hand_landmarker.dart' as mp;
 
-import '../models/gesture_result_model.dart';
-import '../models/hand_landmark_model.dart';
-import '../models/gesture_action_model.dart';
-import '../utils/image_preprocessor.dart';
-import '../utils/gesture_cooldown_helper.dart';
-import '../utils/gesture_stability_helper.dart';
-import 'gesture_log_local_service.dart';
-import 'gesture_classifier_service.dart';
-import '../models/gesture_log_model.dart';
 import '../controllers/gesture_action_controller.dart';
 import '../controllers/gesture_navigation_controller.dart';
+import '../models/gesture_action_model.dart';
+import '../models/gesture_log_model.dart';
+import '../models/gesture_result_model.dart';
+import '../models/hand_landmark_model.dart';
+import '../utils/gesture_cooldown_helper.dart';
+import '../utils/gesture_stability_helper.dart';
+import '../utils/image_preprocessor.dart';
+import 'gesture_classifier_service.dart';
+import 'gesture_log_local_service.dart';
 import '../../../services/offline_service.dart';
 
 class GestureDetectionService {
   final GestureCooldownHelper _cooldown =
       GestureCooldownHelper(cooldownMs: 1000);
-  final GestureStabilityHelper _stabilityHelper =
-      GestureStabilityHelper(requiredStableFrames: 10); // Naik dari 5 untuk stabilitas lebih tinggi
+
+  final GestureStabilityHelper _stabilityHelper = GestureStabilityHelper(
+    bufferSize: 6,
+    requiredStableFrames: 3,
+    unknownGraceMs: 500,
+  );
+
   final GestureLogLocalService _localLogService = GestureLogLocalService();
   final GestureClassifierService _classifier = GestureClassifierService();
 
@@ -30,36 +35,19 @@ class GestureDetectionService {
 
   bool _isProcessing = false;
 
-  /// Plugin real hand landmark detection.
-  /// Package hand_landmarker memakai MediaPipe Hand Landmarker di Android.
   mp.HandLandmarkerPlugin? _handLandmarker;
 
-  /// Kalau true, service akan mencoba membaca landmark tangan asli.
-  /// Kalau AI aktif tapi tidak ada tangan, overlay akan dikosongkan.
-  /// Dummy hanya dipakai kalau real detector gagal init / tidak aktif.
   bool _useRealDetection = true;
 
-  /// Mode dummy gesture untuk tahap testing/fallback.
-  /// Nilai yang didukung:
-  /// - open_palm
-  /// - fist
-  /// - thumbs_up
   String _debugGestureType = 'open_palm';
 
-  /// Anti-spam logging.
-  /// Tujuannya agar gesture yang sama tidak disimpan terus-menerus
-  /// selama camera stream aktif.
   String? _lastLoggedGestureType;
   DateTime? _lastLoggedAt;
 
-  /// Kalau gesture sama terus, baru boleh disimpan ulang setelah durasi ini.
-  /// Misalnya user tetap open_palm selama lama, history tidak penuh tiap 1 detik.
   static const int _sameGestureRelogDelayMs = 5000;
 
   String get debugGestureType => _debugGestureType;
 
-  /// Panggil ini setelah camera berhasil initialize.
-  /// Jangan dibuat async karena API HandLandmarkerPlugin.create() synchronous.
   void initializeRealDetector() {
     if (_handLandmarker != null) return;
 
@@ -86,16 +74,10 @@ class GestureDetectionService {
     } else {
       _debugGestureType = 'open_palm';
     }
+
+    _stabilityHelper.reset();
   }
 
-  /// Main entry point untuk detection pipeline.
-  ///
-  /// Alur sekarang:
-  /// CameraImage
-  /// -> coba real hand landmark detection
-  /// -> kalau dapat 21 landmark, klasifikasikan gesture real
-  /// -> kalau AI aktif tapi tidak ada tangan, return no_hand + landmark kosong
-  /// -> kalau AI gagal init / tidak aktif, fallback ke dummy landmark.
   Future<GestureResultModel?> processImage(
     CameraImage image, {
     int sensorOrientation = 90,
@@ -104,9 +86,6 @@ class GestureDetectionService {
     _isProcessing = true;
 
     try {
-      // ============================================================
-      // 1. REAL HAND LANDMARK DETECTION
-      // ============================================================
       if (_useRealDetection && _handLandmarker != null) {
         try {
           final hands = _handLandmarker!.detect(
@@ -117,86 +96,42 @@ class GestureDetectionService {
           final realLandmarks = _convertMediaPipeLandmarks(hands);
 
           if (realLandmarks.length == 21) {
-            final result = _classifier.classify(realLandmarks);
+            final rawResult = _classifier.classify(realLandmarks);
+            final stableOutput = _stabilityHelper.process(rawResult);
+            final resultForUi = stableOutput.result;
 
-            // LOGIKA STABILITAS
-            final isStable = _stabilityHelper.processStability(result);
+            await _handleStableActionIfNeeded(stableOutput);
 
-            // History & Action hanya menggunakan gesture yang sudah stabil
-            if (isStable && _shouldLogGesture(result)) {
-              await _saveGestureLog(result);
-              _updateLastLoggedGesture(result);
-              
-              debugPrint('🔥 STABLE GESTURE DETECTED: ${result.gestureType}');
-
-              // Route gesture action melalui GestureNavigationController (baru)
-              // atau fallback ke GestureActionController (lama)
-              if (gestureNavigationController != null) {
-                // NEW: Menggunakan GestureNavigationController dengan cooldown check built-in
-                final actionType = _gestureTypeToActionType(result.gestureType);
-                await gestureNavigationController!.handleGestureAction(
-                  type: actionType,
-                  confidence: result.confidence,
-                  isStable: isStable,
-                  context: null, // Context akan dipegang oleh page yang register callbacks
-                );
-              } else if (actionController != null) {
-                // FALLBACK: Old controller tanpa cooldown notification
-                actionController!.handleAction(result);
-              }
-            }
-
-            return result;
+            return resultForUi;
           }
 
-          // Jika tangan tidak terdeteksi (length != 21), reset stability
           _stabilityHelper.reset();
-
-          // PENTING:
-          // Kalau AI aktif tapi tidak menemukan tangan,
-          // jangan fallback ke dummy.
-          // Dummy lama dibuat dalam koordinat layar normal,
-          // sedangkan overlay sekarang sudah ditransform untuk landmark real.
           return GestureResultModel.noHand();
         } catch (e) {
           debugPrint('❌ Real hand detection failed: $e');
-
-          // Kalau detect error sesaat, kosongkan overlay dulu.
-          // Jangan tampilkan dummy supaya tidak terlihat miring/aneh.
+          _stabilityHelper.reset();
           return GestureResultModel.noHand();
         }
       }
 
-      // ============================================================
-      // 2. FALLBACK DUMMY PIPELINE
-      // ============================================================
-      // Bagian ini hanya jalan kalau real detector belum aktif / gagal init.
-      // Dummy tetap dipertahankan agar fitur debug lama tidak hilang.
-
-      // Preprocessing placeholder.
-      // Untuk sekarang belum dipakai, tapi tetap dipanggil agar pipeline PCD
-      // kamu tetap terlihat siap untuk pengembangan TFLite/manual preprocessing.
+      // Fallback dummy pipeline.
+      // Ini hanya dipakai kalau real detector gagal init / tidak aktif.
       // ignore: unused_local_variable
       final inputData = await ImagePreprocessor.preprocessCameraImage(image);
 
       final mockLandmarks = _generateMockLandmarks(_debugGestureType);
 
-      final result = _buildDebugGestureResult(
+      final rawResult = _buildDebugGestureResult(
         gestureType: _debugGestureType,
         landmarks: mockLandmarks,
       );
 
-      // LOGIKA STABILITAS (Untuk Fallback Dummy)
-      final isStable = _stabilityHelper.processStability(result);
+      final stableOutput = _stabilityHelper.process(rawResult);
+      final resultForUi = stableOutput.result;
 
-      if (isStable && _cooldown.canTrigger() && _shouldLogGesture(result)) {
-        _cooldown.updateLastTrigger();
+      await _handleStableActionIfNeeded(stableOutput);
 
-        await _saveGestureLog(result);
-        _updateLastLoggedGesture(result);
-      }
-
-      return result;
+      return resultForUi;
     } catch (e) {
       debugPrint('❌ Error in GestureDetectionService: $e');
       return null;
@@ -205,8 +140,53 @@ class GestureDetectionService {
     }
   }
 
-  /// Convert output package hand_landmarker menjadi model HandLandmark milik project.
-  /// Package mengembalikan List<Hand>, tiap Hand punya 21 landmark.
+  Future<void> _handleStableActionIfNeeded(
+    GestureStabilityOutput stableOutput,
+  ) async {
+    final result = stableOutput.result;
+
+    if (!stableOutput.shouldTriggerAction) {
+      return;
+    }
+
+    if (!_shouldLogGesture(result)) {
+      return;
+    }
+
+    debugPrint(
+      '🔥 STABLE GESTURE DETECTED: '
+      '${result.gestureType} | '
+      'raw=${stableOutput.rawGesture} | '
+      'winnerCount=${stableOutput.winnerCount}',
+    );
+
+    await _saveGestureLog(result);
+    _updateLastLoggedGesture(result);
+
+    if (gestureNavigationController != null) {
+      final actionType = _gestureTypeToActionType(result.gestureType);
+
+      await gestureNavigationController!.handleGestureAction(
+        type: actionType,
+        confidence: result.confidence,
+        isStable: stableOutput.isStable,
+        context: null,
+      );
+
+      return;
+    }
+
+    if (actionController != null) {
+      if (!_cooldown.canTrigger()) {
+        debugPrint('⏳ Gesture fallback cooldown active');
+        return;
+      }
+
+      _cooldown.updateLastTrigger();
+      actionController!.handleAction(result);
+    }
+  }
+
   List<HandLandmark> _convertMediaPipeLandmarks(List<mp.Hand> hands) {
     if (hands.isEmpty) return [];
 
@@ -263,12 +243,21 @@ class GestureDetectionService {
       'thumbs_up',
     };
 
-    // Hanya gesture valid yang boleh masuk history.
     if (!validGestures.contains(result.gestureType)) {
       return false;
     }
 
-    return true; // Logging dipicu oleh stabilitas & cooldown di processImage
+    final now = DateTime.now();
+
+    if (_lastLoggedGestureType == result.gestureType && _lastLoggedAt != null) {
+      final diff = now.difference(_lastLoggedAt!).inMilliseconds;
+
+      if (diff < _sameGestureRelogDelayMs) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   void _updateLastLoggedGesture(GestureResultModel result) {
@@ -293,8 +282,6 @@ class GestureDetectionService {
     await _localLogService.saveGestureLog(log);
   }
 
-  /// Placeholder untuk output landmark detection asli.
-  /// Untuk sekarang tetap dipertahankan sebagai fallback/debug.
   List<HandLandmark> _generateMockLandmarks(String gestureType) {
     switch (gestureType) {
       case 'fist':
@@ -315,118 +302,99 @@ class GestureDetectionService {
     );
   }
 
-  /// 21 titik landmark tangan terbuka.
-  /// Index mengikuti format umum MediaPipe:
-  /// 0 wrist
-  /// 1-4 thumb
-  /// 5-8 index
-  /// 9-12 middle
-  /// 13-16 ring
-  /// 17-20 pinky
   List<HandLandmark> _mockOpenPalm() {
     return [
-      _point(0.50, 0.82), // 0 wrist
+      _point(0.50, 0.82),
 
-      _point(0.42, 0.72), // 1 thumb cmc
-      _point(0.34, 0.62), // 2 thumb mcp
-      _point(0.27, 0.52), // 3 thumb ip
-      _point(0.20, 0.43), // 4 thumb tip
+      _point(0.42, 0.72),
+      _point(0.34, 0.62),
+      _point(0.27, 0.52),
+      _point(0.20, 0.43),
 
-      _point(0.42, 0.62), // 5 index mcp
-      _point(0.39, 0.48), // 6 index pip
-      _point(0.38, 0.35), // 7 index dip
-      _point(0.37, 0.22), // 8 index tip
+      _point(0.42, 0.62),
+      _point(0.39, 0.48),
+      _point(0.38, 0.35),
+      _point(0.37, 0.22),
 
-      _point(0.50, 0.60), // 9 middle mcp
-      _point(0.50, 0.44), // 10 middle pip
-      _point(0.50, 0.30), // 11 middle dip
-      _point(0.50, 0.16), // 12 middle tip
+      _point(0.50, 0.60),
+      _point(0.50, 0.44),
+      _point(0.50, 0.30),
+      _point(0.50, 0.16),
 
-      _point(0.58, 0.62), // 13 ring mcp
-      _point(0.61, 0.48), // 14 ring pip
-      _point(0.62, 0.35), // 15 ring dip
-      _point(0.63, 0.23), // 16 ring tip
+      _point(0.58, 0.62),
+      _point(0.61, 0.48),
+      _point(0.62, 0.35),
+      _point(0.63, 0.23),
 
-      _point(0.66, 0.67), // 17 pinky mcp
-      _point(0.71, 0.56), // 18 pinky pip
-      _point(0.74, 0.46), // 19 pinky dip
-      _point(0.77, 0.36), // 20 pinky tip
+      _point(0.66, 0.67),
+      _point(0.71, 0.56),
+      _point(0.74, 0.46),
+      _point(0.77, 0.36),
     ];
   }
 
-  /// 21 titik dummy untuk fist.
-  /// Dibuat menyebar agar terlihat jelas di overlay,
-  /// tetapi bentuknya tetap menunjukkan jari-jari terlipat.
   List<HandLandmark> _mockFist() {
     return [
-      _point(0.50, 0.82), // 0 wrist
+      _point(0.50, 0.82),
 
-      // Thumb folded across palm
-      _point(0.42, 0.72), // 1 thumb cmc
-      _point(0.36, 0.66), // 2 thumb mcp
-      _point(0.34, 0.59), // 3 thumb ip
-      _point(0.40, 0.54), // 4 thumb tip
+      _point(0.42, 0.72),
+      _point(0.36, 0.66),
+      _point(0.34, 0.59),
+      _point(0.40, 0.54),
 
-      // Index folded
-      _point(0.40, 0.61), // 5 index mcp
-      _point(0.38, 0.52), // 6 index pip
-      _point(0.43, 0.48), // 7 index dip
-      _point(0.48, 0.53), // 8 index tip
+      _point(0.40, 0.61),
+      _point(0.38, 0.52),
+      _point(0.43, 0.48),
+      _point(0.48, 0.53),
 
-      // Middle folded
-      _point(0.50, 0.60), // 9 middle mcp
-      _point(0.49, 0.50), // 10 middle pip
-      _point(0.53, 0.47), // 11 middle dip
-      _point(0.57, 0.53), // 12 middle tip
+      _point(0.50, 0.60),
+      _point(0.49, 0.50),
+      _point(0.53, 0.47),
+      _point(0.57, 0.53),
 
-      // Ring folded
-      _point(0.60, 0.61), // 13 ring mcp
-      _point(0.61, 0.52), // 14 ring pip
-      _point(0.58, 0.48), // 15 ring dip
-      _point(0.54, 0.54), // 16 ring tip
+      _point(0.60, 0.61),
+      _point(0.61, 0.52),
+      _point(0.58, 0.48),
+      _point(0.54, 0.54),
 
-      // Pinky folded
-      _point(0.68, 0.65), // 17 pinky mcp
-      _point(0.69, 0.57), // 18 pinky pip
-      _point(0.65, 0.53), // 19 pinky dip
-      _point(0.60, 0.58), // 20 pinky tip
+      _point(0.68, 0.65),
+      _point(0.69, 0.57),
+      _point(0.65, 0.53),
+      _point(0.60, 0.58),
     ];
   }
 
-  /// 21 titik dummy untuk thumbs up.
-  /// Thumb dibuat tinggi, jari lain dilipat.
   List<HandLandmark> _mockThumbsUp() {
     return [
-      _point(0.50, 0.82), // 0 wrist
+      _point(0.50, 0.82),
 
       _point(0.46, 0.68),
       _point(0.45, 0.52),
       _point(0.45, 0.36),
-      _point(0.45, 0.20), // 4 thumb tip tinggi
+      _point(0.45, 0.20),
 
       _point(0.42, 0.62),
       _point(0.44, 0.58),
       _point(0.47, 0.58),
-      _point(0.50, 0.60), // 8 index tip rendah/lipat
+      _point(0.50, 0.60),
 
       _point(0.50, 0.62),
       _point(0.52, 0.58),
       _point(0.54, 0.58),
-      _point(0.56, 0.61), // 12 middle tip rendah/lipat
+      _point(0.56, 0.61),
 
       _point(0.58, 0.63),
       _point(0.59, 0.59),
       _point(0.60, 0.59),
-      _point(0.61, 0.62), // 16 ring tip rendah/lipat
+      _point(0.61, 0.62),
 
       _point(0.65, 0.67),
       _point(0.64, 0.62),
       _point(0.63, 0.61),
-      _point(0.62, 0.64), // 20 pinky tip rendah/lipat
+      _point(0.62, 0.64),
     ];
   }
 
-  /// Convert gesture type string ke GestureActionType enum
   GestureActionType _gestureTypeToActionType(String gestureType) {
     switch (gestureType) {
       case 'thumbs_up':
@@ -442,6 +410,7 @@ class GestureDetectionService {
 
   void dispose() {
     try {
+      _stabilityHelper.reset();
       _handLandmarker?.dispose();
       _handLandmarker = null;
       debugPrint('✅ HandLandmarker disposed');
