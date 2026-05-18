@@ -5,12 +5,14 @@ import '../services/camera_service.dart';
 import '../models/hand_landmark_model.dart';
 import '../services/gesture_detection_service.dart';
 import '../controllers/gesture_action_controller.dart';
+import '../controllers/gesture_navigation_controller.dart';
 
 class CameraProvider extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
   final GestureDetectionService _detectionService = GestureDetectionService();
   
   GestureActionController? _actionController;
+  GestureNavigationController? _navigationController;
 
   bool _isInitialized = false;
   bool _isLoading = false;
@@ -53,6 +55,13 @@ class CameraProvider extends ChangeNotifier {
   /// Menghubungkan detection service ke action controller yang butuh context.
   void setActionController(GestureActionController controller) {
     _detectionService.actionController = controller;
+  }
+
+  /// Menghubungkan detection service ke gesture navigation controller (baru).
+  /// Ini akan digunakan untuk cooldown, stability, confidence validation.
+  void setGestureNavigationController(GestureNavigationController controller) {
+    _navigationController = controller;
+    _detectionService.gestureNavigationController = controller;
   }
 
   // For testing UI: Generates dummy hand points manual tanpa camera stream.

@@ -6,6 +6,7 @@ import 'package:hand_landmarker/hand_landmarker.dart' as mp;
 
 import '../models/gesture_result_model.dart';
 import '../models/hand_landmark_model.dart';
+import '../models/gesture_action_model.dart';
 import '../utils/image_preprocessor.dart';
 import '../utils/gesture_cooldown_helper.dart';
 import '../utils/gesture_stability_helper.dart';
@@ -13,6 +14,7 @@ import 'gesture_log_local_service.dart';
 import 'gesture_classifier_service.dart';
 import '../models/gesture_log_model.dart';
 import '../controllers/gesture_action_controller.dart';
+import '../controllers/gesture_navigation_controller.dart';
 import '../../../services/offline_service.dart';
 
 class GestureDetectionService {
@@ -24,6 +26,7 @@ class GestureDetectionService {
   final GestureClassifierService _classifier = GestureClassifierService();
 
   GestureActionController? actionController;
+  GestureNavigationController? gestureNavigationController;
 
   bool _isProcessing = false;
 
@@ -120,15 +123,27 @@ class GestureDetectionService {
             final isStable = _stabilityHelper.processStability(result);
 
             // History & Action hanya menggunakan gesture yang sudah stabil
-            if (isStable && _cooldown.canTrigger() && _shouldLogGesture(result)) {
-              _cooldown.updateLastTrigger();
+            if (isStable && _shouldLogGesture(result)) {
               await _saveGestureLog(result);
               _updateLastLoggedGesture(result);
               
               debugPrint('🔥 STABLE GESTURE DETECTED: ${result.gestureType}');
 
-              // Eksekusi aksi nyata via controller
-              actionController?.handleAction(result);
+              // Route gesture action melalui GestureNavigationController (baru)
+              // atau fallback ke GestureActionController (lama)
+              if (gestureNavigationController != null) {
+                // NEW: Menggunakan GestureNavigationController dengan cooldown check built-in
+                final actionType = _gestureTypeToActionType(result.gestureType);
+                await gestureNavigationController!.handleGestureAction(
+                  type: actionType,
+                  confidence: result.confidence,
+                  isStable: isStable,
+                  context: null, // Context akan dipegang oleh page yang register callbacks
+                );
+              } else if (actionController != null) {
+                // FALLBACK: Old controller tanpa cooldown notification
+                actionController!.handleAction(result);
+              }
             }
 
             return result;
@@ -409,6 +424,20 @@ class GestureDetectionService {
       _point(0.63, 0.61),
       _point(0.62, 0.64), // 20 pinky tip rendah/lipat
     ];
+  }
+
+  /// Convert gesture type string ke GestureActionType enum
+  GestureActionType _gestureTypeToActionType(String gestureType) {
+    switch (gestureType) {
+      case 'thumbs_up':
+        return GestureActionType.confirm;
+      case 'open_palm':
+        return GestureActionType.next;
+      case 'fist':
+        return GestureActionType.back;
+      default:
+        return GestureActionType.unknown;
+    }
   }
 
   void dispose() {

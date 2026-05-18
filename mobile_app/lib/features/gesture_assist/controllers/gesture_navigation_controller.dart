@@ -23,6 +23,9 @@ class GestureNavigationController extends ChangeNotifier {
   int _cooldownMs = 1500; // Cooldown antara actions
   double _confidenceThreshold = 0.65; // Minimum confidence
 
+  // Callback untuk feedback ke UI
+  Function(GestureActionResult)? _onActionResult;
+
   // Getters
   GestureActionResult? get lastActionResult => _lastActionResult;
   bool get isEnabled => _isEnabled;
@@ -33,6 +36,11 @@ class GestureNavigationController extends ChangeNotifier {
   void setCooldown(int ms) {
     _cooldownMs = ms;
     notifyListeners();
+  }
+
+  /// Register callback untuk action results (untuk UI feedback)
+  void onActionResult(Function(GestureActionResult) callback) {
+    _onActionResult = callback;
   }
 
   /// Set confidence threshold (0.0 - 1.0)
@@ -100,50 +108,54 @@ class GestureNavigationController extends ChangeNotifier {
   }) async {
     // Safety check: tidak aktif
     if (!_isEnabled) {
-      _lastActionResult = GestureActionResult(
+      final result = GestureActionResult(
         type: type,
         status: ActionStatus.skipped,
         message: 'Gesture Navigation sedang non-aktif',
       );
+      _setActionResult(result);
       notifyListeners();
-      return _lastActionResult!;
+      return result;
     }
 
     // Check confidence
     if (confidence < _confidenceThreshold) {
-      _lastActionResult = GestureActionResult(
+      final result = GestureActionResult(
         type: type,
         status: ActionStatus.notReady,
         message:
             'Confidence terlalu rendah: ${confidence.toStringAsFixed(2)} < $_confidenceThreshold',
       );
+      _setActionResult(result);
       notifyListeners();
-      return _lastActionResult!;
+      return result;
     }
 
     // Check stability
     if (!isStable) {
-      _lastActionResult = GestureActionResult(
+      final result = GestureActionResult(
         type: type,
         status: ActionStatus.notReady,
         message: 'Gesture belum stabil',
       );
+      _setActionResult(result);
       notifyListeners();
-      return _lastActionResult!;
+      return result;
     }
 
     // Check cooldown
     if (!_canExecuteAction()) {
       final timeSinceLastAction =
           DateTime.now().difference(_lastActionTime!).inMilliseconds;
-      _lastActionResult = GestureActionResult(
+      final result = GestureActionResult(
         type: type,
         status: ActionStatus.notReady,
         message:
             'Cooldown aktif: tunggu ${_cooldownMs - timeSinceLastAction}ms',
       );
+      _setActionResult(result);
       notifyListeners();
-      return _lastActionResult!;
+      return result;
     }
 
     // Execute action
@@ -167,7 +179,7 @@ class GestureNavigationController extends ChangeNotifier {
     }
 
     // Update state
-    _lastActionResult = result;
+    _setActionResult(result);
     _lastActionTime = DateTime.now();
 
     // Log action jika berhasil
@@ -194,6 +206,12 @@ class GestureNavigationController extends ChangeNotifier {
 
     notifyListeners();
     return result;
+  }
+
+  /// Helper untuk set result dan trigger callback UI
+  void _setActionResult(GestureActionResult result) {
+    _lastActionResult = result;
+    _onActionResult?.call(result);
   }
 
   /// Debug helper

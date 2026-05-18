@@ -5,6 +5,7 @@ import '../providers/camera_provider.dart';
 import '../widgets/camera_preview_widget.dart';
 import '../widgets/hand_overlay_widget.dart';
 import '../controllers/gesture_action_controller.dart';
+import '../controllers/gesture_navigation_controller.dart';
 
 class GestureCameraPage extends StatefulWidget {
   const GestureCameraPage({super.key});
@@ -15,20 +16,48 @@ class GestureCameraPage extends StatefulWidget {
 
 class _GestureCameraPageState extends State<GestureCameraPage> {
   late GestureActionController _actionController;
+  late GestureNavigationController _navigationController;
 
   @override
   void initState() {
     super.initState();
     _actionController = GestureActionController(context);
+    _navigationController = GestureNavigationController();
+
+    // Register callback untuk show feedback ketika action selesai
+    _navigationController.onActionResult((result) {
+      if (!mounted) return;
+
+      // Show SnackBar feedback
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.message ?? 'Action',
+            style: const TextStyle(color: Colors.white),
+          ),
+          backgroundColor: result.isSuccess ? Colors.green : Colors.red,
+          duration: const Duration(milliseconds: 1500),
+        ),
+      );
+    });
 
     // Initialize camera on start
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<CameraProvider>();
       provider.initializeCamera();
       
-      // Pasang action controller ke provider agar bisa eksekusi aksi navigasi
+      // Wire BOTH controllers to provider
+      // GestureNavigationController will be used (newer, dengan cooldown notif)
+      // GestureActionController sebagai fallback
       provider.setActionController(_actionController);
+      provider.setGestureNavigationController(_navigationController);
     });
+  }
+
+  @override
+  void dispose() {
+    _navigationController.dispose();
+    super.dispose();
   }
 
   @override
