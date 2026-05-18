@@ -247,7 +247,7 @@ class OfflineService {
       print('📊 DEBUG: First job has job_photo: ${firstJob.containsKey('job_photo')}');
       if (firstJob.containsKey('job_photo')) {
         final photoLength = firstJob['job_photo']?.toString().length ?? 0;
-        print('📊 DEBUG: job_photo field size: ${photoLength} bytes');
+        print('📊 DEBUG: job_photo field size: $photoLength bytes');
       }
     }
   }

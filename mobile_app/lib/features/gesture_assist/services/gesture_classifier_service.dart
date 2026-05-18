@@ -19,7 +19,7 @@ class GestureClassifierService {
     }
 
     final openPalmScore = _openPalmScore(landmarks);
-    final fistScore = _fistScore(landmarks);
+    var fistScore = _fistScore(landmarks);
     final thumbsUpScore = _thumbsUpScore(landmarks);
 
     debugPrint(
@@ -32,6 +32,38 @@ class GestureClassifierService {
     // Thumbs up dan Fist sangat mirip (4 jari terlipat).
     // Kita harus memastikan pemenang skor tertinggi yang diambil dengan kombinasi scoring + angle.
     // Gunakan scoring untuk determinasi gesture dengan presisi tinggi.
+    
+    // === OPTION C: Penalize Fist When Thumb Dominates ===
+    // Jika thumb clearly extended dan dominates other fingers, reduce fist score
+    // Logika: dalam thumbs up asli, jempol harus visually dominant (bukan just "available")
+    if (thumbsUpScore >= 0.65) {
+      final thumb = landmarks[4];
+      final thumbMcp = landmarks[2];
+      final thumbIp = landmarks[3];
+      final palm = _palmSize(landmarks);
+      
+      final thumbLength = _distance(thumb, thumbMcp);
+      final thumbBaseLength = _distance(thumbIp, thumbMcp);
+      final thumbClearlyExtended = thumbLength > thumbBaseLength * 1.65;
+      
+      // Check if thumb dominates
+      final thumbTipToWrist = _distance(thumb, landmarks[0]);
+      final otherTips = [_distance(landmarks[8], landmarks[0]), 
+                         _distance(landmarks[12], landmarks[0]), 
+                         _distance(landmarks[16], landmarks[0]), 
+                         _distance(landmarks[20], landmarks[0])];
+      final avgOtherTipToWrist = otherTips.reduce((a, b) => a + b) / otherTips.length;
+      final maxOtherTipToWrist = otherTips.reduce(max);
+      
+      // Jika thumb clearly extended, reduce fist score (25% penalty)
+      // Logika: thumbs up selalu punya thumb extended; fist punya semua jari tertutup
+      if (thumbClearlyExtended) {
+        fistScore *= 0.75;
+        if (kDebugMode) {
+          print('[FIST PENALTY v2] Applied 25% penalty due to thumb extension: $fistScore');
+        }
+      }
+    }
     
     // DEBUG: Log semua scores untuk tuning
     if (kDebugMode) {

@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/mongo_service.dart';
-import '../cv/cv_controller.dart';
-import '../cv/cv_detail_view.dart';
 import '../company/company_applicant_detail_page.dart';
-import '../applications/applications_page.dart';
 import 'job_seeker_notification_detail_page.dart';
 import '../profile/accessibility_settings_view.dart';
 

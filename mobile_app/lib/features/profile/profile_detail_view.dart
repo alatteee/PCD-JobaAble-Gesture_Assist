@@ -1,11 +1,9 @@
 ﻿import 'package:flutter/material.dart';
-import '../../core/constants/app_colors.dart';
 import 'profile_controller.dart';
 import 'edit_profile_view.dart';
 import 'widgets/skill_chip.dart';
 import 'widgets/profile_info_field.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 
 class ProfileDetailView extends StatefulWidget {

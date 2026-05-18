@@ -764,7 +764,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                       Switch(
                         value: isHighContrast,
-                        activeColor: Colors.yellow,
+                        activeThumbColor: Colors.yellow,
                         activeTrackColor: Colors.grey.shade800,
                         onChanged: (value) {
                           AccessibilityController.setHighContrast(value);

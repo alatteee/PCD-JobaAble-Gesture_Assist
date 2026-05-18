@@ -20,7 +20,7 @@ class CvController {
         } else {
           uidString = userId;
         }
-        uid = ObjectId.fromHexString(uidString!);
+        uid = ObjectId.fromHexString(uidString);
       }
 
       if (uidString != null && !hasConnection) {
@@ -75,8 +75,9 @@ class CvController {
       final userId = data['user_id'];
       String? uidString;
       
-      if (userId is ObjectId) uidString = userId.toHexString();
-      else if (userId is String) uidString = userId;
+      if (userId is ObjectId) {
+        uidString = userId.toHexString();
+      } else if (userId is String) uidString = userId;
 
       if (!hasConnection && uidString != null) {
         print('📱 CV creation: Offline. Queueing sync.');
@@ -112,8 +113,9 @@ class CvController {
       try {
         final userId = data['user_id'];
         String? uidString;
-        if (userId is ObjectId) uidString = userId.toHexString();
-        else if (userId is String) uidString = userId;
+        if (userId is ObjectId) {
+          uidString = userId.toHexString();
+        } else if (userId is String) uidString = userId;
         
         if (uidString != null) {
           await OfflineService.cacheUserCV(uidString, data);
@@ -187,8 +189,9 @@ class CvController {
       // Fallback: cache dan queue untuk sync nanti
       try {
         String? uidString;
-        if (userId is ObjectId) uidString = userId.toHexString();
-        else if (userId is String) uidString = userId;
+        if (userId is ObjectId) {
+          uidString = userId.toHexString();
+        } else if (userId is String) uidString = userId;
         
         if (uidString != null) {
           await OfflineService.cacheUserCV(uidString, data);

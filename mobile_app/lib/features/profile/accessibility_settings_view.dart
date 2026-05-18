@@ -21,11 +21,9 @@ class AccessibilityTheme {
       primary: yellow,
       secondary: yellow,
       surface: black,
-      background: black,
       onPrimary: black,
       onSecondary: black,
       onSurface: yellow,
-      onBackground: yellow,
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: black,

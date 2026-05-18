@@ -68,8 +68,8 @@ class _CompanyApplicantDetailPageState
 
       if (!mounted) return;
 
-      final loadedUser = results[0] as Map<String, dynamic>?;
-      var loadedUserDetails = results[1] as Map<String, dynamic>?;
+      final loadedUser = results[0];
+      var loadedUserDetails = results[1];
 
       if (loadedUserDetails == null) {
         final applicantEmail = widget.applicant['email']?.toString() ?? '';

@@ -48,15 +48,13 @@ class MongoService {
   /// Tutup koneksi lama dengan paksa dan reset semua reference
   static Future<void> _forceCloseOldConnection() async {
     try {
-      if (db != null) {
-        try {
-          await db.close();
-          print('🔴 Old MongoDB connection closed');
-        } catch (e) {
-          print('⚠️ Error closing old connection: $e');
-        }
+      try {
+        await db.close();
+        print('🔴 Old MongoDB connection closed');
+      } catch (e) {
+        print('⚠️ Error closing old connection: $e');
       }
-    } catch (_) {}
+        } catch (_) {}
   }
 
   static Future<void> connect() async {

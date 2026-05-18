@@ -587,7 +587,7 @@ class _EditProfileViewState extends State<EditProfileView> {
               ],
             ),
             child: DropdownButtonFormField<String>(
-              value: value,
+              initialValue: value,
               dropdownColor: theme.brightness == Brightness.dark ? Colors.grey.shade900 : Colors.white,
               isExpanded: true, 
               items: options.map((o) => DropdownMenuItem(
