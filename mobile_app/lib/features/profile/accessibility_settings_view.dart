@@ -445,7 +445,7 @@ class _GestureNavigationModeToggle extends StatelessWidget {
               const SizedBox(width: 10),
               Switch(
                 value: isGestureModeOn,
-                activeColor:
+                activeThumbColor:
                     isHighContrast ? AccessibilityTheme.yellow : mainColor,
                 onChanged: (value) async {
                   await AccessibilityController.setGestureNavigationMode(value);

@@ -1,10 +1,8 @@
 ﻿import 'package:flutter/material.dart';
-import '../../core/constants/app_colors.dart';
 import 'profile_controller.dart';
 import 'widgets/skill_chip.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 
