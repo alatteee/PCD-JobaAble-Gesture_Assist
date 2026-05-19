@@ -11,6 +11,8 @@ import '../profile/profile_controller.dart';
 
 import '../notifications/notification_page.dart';
 import '../cv/cv_view.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/utils/gesture_navigation_guard.dart';
 
 class HomePage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -45,6 +47,11 @@ class _HomePageState extends State<HomePage> {
   String searchQuery = '';
 
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _homeScrollController = ScrollController();
+  final GestureNavigationController _gestureNavigationController =
+      GestureNavigationController();
+
+  int _currentFocusedJobIndex = 0;
 
   @override
   void initState() {
@@ -60,10 +67,19 @@ class _HomePageState extends State<HomePage> {
 
     fetchProfileName();
     fetchJobs();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
+    });
   }
 
   @override
   void dispose() {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+    _homeScrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -309,6 +325,15 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       filteredJobs = result;
+      if (filteredJobs.isEmpty) {
+        _currentFocusedJobIndex = 0;
+      } else if (_currentFocusedJobIndex >= filteredJobs.length) {
+        _currentFocusedJobIndex = filteredJobs.length - 1;
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
     });
   }
 
@@ -431,6 +456,154 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _selectedIndex = index;
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_selectedIndex == 0) {
+        _registerHomeGestureActionsIfNeeded();
+      } else {
+        GestureNavigationGuard.unregisterPageGestures(
+          _gestureNavigationController,
+          owner: this,
+        );
+      }
+    });
+  }
+
+  void _registerHomeGestureActionsIfNeeded() {
+    if (!mounted || _selectedIndex != 0) return;
+
+    GestureNavigationGuard.registerPageGestures(
+      controller: _gestureNavigationController,
+      owner: this,
+      screenContext: 'home',
+      scrollController: _homeScrollController,
+      onNext: _handleGestureNextJob,
+      onBack: _handleGestureBackFromHome,
+      onConfirm: _handleGestureOpenFocusedJob,
+    );
+
+    _gestureNavigationController.printStatus();
+  }
+
+  Future<bool> _handleGestureNextJob() async {
+    if (!mounted) return false;
+
+    if (filteredJobs.isEmpty) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan yang tersedia',
+        isError: true,
+      );
+      return false;
+    }
+
+    if (_currentFocusedJobIndex >= filteredJobs.length - 1) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan berikutnya',
+        isError: true,
+      );
+      return false;
+    }
+
+    setState(() {
+      _currentFocusedJobIndex++;
+    });
+
+    if (_homeScrollController.hasClients) {
+      final targetOffset = (520.0 + (_currentFocusedJobIndex * 170.0)).clamp(
+        0.0,
+        _homeScrollController.position.maxScrollExtent,
+      );
+
+      await _homeScrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    }
+
+    _showGesturePageFeedback(
+      'Lowongan ${_currentFocusedJobIndex + 1} dipilih',
+    );
+    return true;
+  }
+
+  Future<bool> _handleGestureOpenFocusedJob() async {
+    if (!mounted) return false;
+
+    if (filteredJobs.isEmpty ||
+        _currentFocusedJobIndex < 0 ||
+        _currentFocusedJobIndex >= filteredJobs.length) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan yang sedang dipilih',
+        isError: true,
+      );
+      return false;
+    }
+
+    final jobMap = Map<String, dynamic>.from(
+      filteredJobs[_currentFocusedJobIndex] as Map,
+    );
+
+    _showGesturePageFeedback('Membuka detail lowongan');
+    await _openJobDetailWithGestureReRegister(jobMap);
+    return true;
+  }
+
+  Future<bool> _handleGestureBackFromHome() async {
+    if (!mounted) return false;
+
+    if (_selectedIndex != 0) {
+      setState(() {
+        _selectedIndex = 0;
+      });
+      _registerHomeGestureActionsIfNeeded();
+      return true;
+    }
+
+    final popped = await Navigator.maybePop(context);
+
+    if (!popped && mounted) {
+      _showGesturePageFeedback(
+        'Tidak ada halaman sebelumnya untuk kembali',
+        isError: true,
+      );
+    }
+
+    return popped;
+  }
+
+  Future<void> _openJobDetailWithGestureReRegister(
+    Map<String, dynamic> jobMap,
+  ) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => JobDetailPage(
+          job: jobMap,
+          currentUser: widget.userData,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
+    });
+  }
+
+  void _showGesturePageFeedback(
+    String message, {
+    bool isError = false,
+  }) {
+    if (!mounted) return;
+
+    _showCustomSnackBar(
+      message: message,
+      icon: isError ? Icons.warning_amber_rounded : Icons.check_circle_rounded,
+      backgroundColor: isError ? Colors.orange : const Color(0xFF16A34A),
+      isHighContrast: AccessibilityController.highContrastNotifier.value,
+    );
   }
 
   Future<void> _openNotificationPage() async {
@@ -662,6 +835,7 @@ class _HomePageState extends State<HomePage> {
       color: theme.colorScheme.primary,
       onRefresh: fetchJobs,
       child: SingleChildScrollView(
+        controller: _homeScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -878,28 +1052,42 @@ class _HomePageState extends State<HomePage> {
                 ),
               )
             else
-              ...filteredJobs.map(
-                (job) {
-                  final jobMap = job as Map<String, dynamic>;
+              ...filteredJobs.asMap().entries.map(
+                (entry) {
+                  final index = entry.key;
+                  final jobMap = entry.value as Map<String, dynamic>;
+                  final isFocused = index == _currentFocusedJobIndex;
+
                   return ValueListenableBuilder<bool>(
-                    valueListenable: AccessibilityController.highContrastNotifier,
+                    valueListenable:
+                        AccessibilityController.highContrastNotifier,
                     builder: (context, isHighContrast, _) {
-                      return _JobCard(
-                        job: jobMap,
-                        isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
-                        isHighContrast: isHighContrast,
-                        onDetail: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => JobDetailPage(
-                                job: jobMap,
-                                currentUser: widget.userData,
-                              ),
-                            ),
-                          );
-                        },
-                        onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        margin: EdgeInsets.only(bottom: isFocused ? 10 : 0),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          border: isFocused
+                              ? Border.all(
+                                  color: isHighContrast
+                                      ? AccessibilityTheme.yellow
+                                      : AppColors.primaryNavy,
+                                  width: 2,
+                                )
+                              : null,
+                        ),
+                        child: _JobCard(
+                          job: jobMap,
+                          isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
+                          isHighContrast: isHighContrast,
+                          onDetail: () {
+                            setState(() {
+                              _currentFocusedJobIndex = index;
+                            });
+                            _openJobDetailWithGestureReRegister(jobMap);
+                          },
+                          onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                        ),
                       );
                     },
                   );

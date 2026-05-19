@@ -7,24 +7,28 @@ import '../services/gesture_action_service.dart';
 import '../services/gesture_log_local_service.dart';
 
 /// Controller utama untuk Gesture Navigation.
-/// Tugas:
-/// - cek mode ON/OFF dari local storage
-/// - cek confidence
-/// - cek stability
-/// - cek cooldown
-/// - cegah double trigger
-/// - execute callback halaman aktif
-/// - simpan log jika action berhasil
+///
+/// Controller ini dibuat singleton/shared supaya GestureCameraPage dan halaman
+/// asli JobAble memakai controller/action registry yang sama.
 class GestureNavigationController extends ChangeNotifier {
+  static final GestureNavigationController _instance =
+      GestureNavigationController._internal();
+
+  factory GestureNavigationController({GestureLogLocalService? logService}) {
+    if (logService != null) {
+      _instance._logService = logService;
+    }
+    return _instance;
+  }
+
+  GestureNavigationController._internal()
+      : _logService = GestureLogLocalService();
+
   static const String _settingsBoxName = 'accessibilitySettings';
   static const String _gestureNavigationModeKey = 'gestureNavigationMode';
 
   final GestureActionService _actionService = GestureActionService();
-  final GestureLogLocalService _logService;
-
-  GestureNavigationController({
-    GestureLogLocalService? logService,
-  }) : _logService = logService ?? GestureLogLocalService();
+  GestureLogLocalService _logService;
 
   GestureActionResult? _lastActionResult;
   DateTime? _lastActionTime;
@@ -59,15 +63,8 @@ class GestureNavigationController extends ChangeNotifier {
     _screenContext = screenContext;
   }
 
-  /// Manual enable/disable untuk controller.
-  /// Final decision tetap dicek juga dari Gesture Navigation Mode di Hive.
   void setEnabled(bool enabled) {
     _isEnabled = enabled;
-
-    if (!enabled) {
-      _actionService.clearCallbacks();
-    }
-
     notifyListeners();
   }
 
@@ -75,59 +72,57 @@ class GestureNavigationController extends ChangeNotifier {
     _onActionResult = callback;
   }
 
-  /// Register callback untuk CONFIRM (Thumbs Up).
+  /// Compatibility methods untuk kode lama.
   void registerConfirmAction(GestureConfirmCallback callback) {
     _actionService.onConfirmAction(callback);
   }
 
-  /// Register callback untuk NEXT (Open Palm).
   void registerNextAction(GestureNextCallback callback) {
     _actionService.onNextAction(callback);
   }
 
-  /// Register callback untuk BACK (Fist).
   void registerBackAction(GestureBackCallback callback) {
     _actionService.onBackAction(callback);
   }
 
-  /// Register fallback ScrollController untuk NEXT.
   void setScrollController(ScrollController controller) {
     _actionService.setScrollController(controller);
   }
 
-  /// Helper untuk register semua action halaman sekaligus.
+  /// Register callback halaman aktif.
   void registerPageActions({
+    required Object owner,
     GestureConfirmCallback? onConfirm,
     GestureNextCallback? onNext,
     GestureBackCallback? onBack,
     ScrollController? scrollController,
     String? screenContext,
   }) {
-    if (screenContext != null) {
-      setScreenContext(screenContext);
-    }
+    final contextName = screenContext ?? 'unknown';
+    _screenContext = contextName;
 
-    if (onConfirm != null) {
-      registerConfirmAction(onConfirm);
-    }
+    _actionService.registerPageActions(
+      owner: owner,
+      screenContext: contextName,
+      onConfirm: onConfirm,
+      onNext: onNext,
+      onBack: onBack,
+      scrollController: scrollController,
+    );
 
-    if (onNext != null) {
-      registerNextAction(onNext);
-    }
-
-    if (onBack != null) {
-      registerBackAction(onBack);
-    }
-
-    if (scrollController != null) {
-      setScrollController(scrollController);
-    }
+    notifyListeners();
   }
 
-  /// Clear semua registered actions.
+  void unregisterPageActions(Object owner) {
+    _actionService.unregisterOwner(owner);
+    _screenContext = _actionService.activeScreenContext;
+    notifyListeners();
+  }
+
   void clearActions() {
     _actionService.clearCallbacks();
     _screenContext = 'unknown';
+    notifyListeners();
   }
 
   Future<bool> _isGestureNavigationModeEnabled() async {
@@ -140,11 +135,7 @@ class GestureNavigationController extends ChangeNotifier {
         box = await Hive.openBox<dynamic>(_settingsBoxName);
       }
 
-      return box.get(
-            _gestureNavigationModeKey,
-            defaultValue: false,
-          ) ==
-          true;
+      return box.get(_gestureNavigationModeKey, defaultValue: false) == true;
     } catch (e) {
       debugPrint('[GestureNavigation] Failed to read gesture mode: $e');
       return false;
@@ -179,6 +170,8 @@ class GestureNavigationController extends ChangeNotifier {
   }) async {
     if (screenContext != null) {
       _screenContext = screenContext;
+    } else {
+      _screenContext = _actionService.activeScreenContext;
     }
 
     if (!_isEnabled) {
@@ -265,6 +258,8 @@ class GestureNavigationController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      _actionService.printRegisteredCallbacks();
+
       final result = await _executeAction(
         type: type,
         context: context,
@@ -283,7 +278,9 @@ class GestureNavigationController extends ChangeNotifier {
 
         debugPrint('[GestureNavigation] Action success: ${result.message}');
       } else {
-        debugPrint('[GestureNavigation] Action ignored/failed: ${result.message}');
+        debugPrint(
+          '[GestureNavigation] Action ignored/failed: ${result.message}',
+        );
       }
 
       return result;
@@ -336,7 +333,7 @@ class GestureNavigationController extends ChangeNotifier {
         gestureType: _gestureNameFromType(type),
         action: actionName,
         confidence: confidence,
-        screenContext: _screenContext,
+        screenContext: _actionService.activeScreenContext,
         timestamp: DateTime.now(),
         syncStatus: 'pending',
       );
@@ -407,8 +404,9 @@ class GestureNavigationController extends ChangeNotifier {
   }
 
   @override
+  // ignore: must_call_super
   void dispose() {
-    clearActions();
-    super.dispose();
+    // Controller ini singleton/shared, jadi jangan clear callback global di sini.
+    debugPrint('[GestureNavigation] dispose ignored for singleton controller');
   }
 }

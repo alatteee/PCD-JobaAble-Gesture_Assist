@@ -149,10 +149,6 @@ class GestureDetectionService {
       return;
     }
 
-    if (!_shouldLogGesture(result)) {
-      return;
-    }
-
     debugPrint(
       '🔥 STABLE GESTURE DETECTED: '
       '${result.gestureType} | '
@@ -160,18 +156,23 @@ class GestureDetectionService {
       'winnerCount=${stableOutput.winnerCount}',
     );
 
-    await _saveGestureLog(result);
-    _updateLastLoggedGesture(result);
-
     if (gestureNavigationController != null) {
       final actionType = _gestureTypeToActionType(result.gestureType);
 
-      await gestureNavigationController!.handleGestureAction(
+      final actionResult = await gestureNavigationController!.handleGestureAction(
         type: actionType,
         confidence: result.confidence,
         isStable: stableOutput.isStable,
         context: null,
       );
+
+      // Jangan jadikan log throttle sebagai syarat action.
+      // Action harus tetap bisa jalan selama stable/cooldown controller lolos.
+      // Log raw gesture_camera_page hanya disimpan jika action belum dilog oleh
+      // GestureNavigationController atau saat memakai fallback controller.
+      if (actionResult.isSuccess && _shouldLogGesture(result)) {
+        _updateLastLoggedGesture(result);
+      }
 
       return;
     }
@@ -184,6 +185,11 @@ class GestureDetectionService {
 
       _cooldown.updateLastTrigger();
       actionController!.handleAction(result);
+
+      if (_shouldLogGesture(result)) {
+        await _saveGestureLog(result);
+        _updateLastLoggedGesture(result);
+      }
     }
   }
 

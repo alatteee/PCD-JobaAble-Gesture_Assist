@@ -79,11 +79,7 @@ class GestureNavigationGuard {
         duration: const Duration(milliseconds: 1500),
         content: Row(
           children: [
-            Icon(
-              icon,
-              color: Colors.white,
-              size: 20,
-            ),
+            Icon(icon, color: Colors.white, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -100,10 +96,7 @@ class GestureNavigationGuard {
     );
   }
 
-  static void showSuccessFeedback(
-    BuildContext context,
-    String message,
-  ) {
+  static void showSuccessFeedback(BuildContext context, String message) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -115,10 +108,7 @@ class GestureNavigationGuard {
     );
   }
 
-  static void showErrorFeedback(
-    BuildContext context,
-    String message,
-  ) {
+  static void showErrorFeedback(BuildContext context, String message) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -132,6 +122,7 @@ class GestureNavigationGuard {
 
   static void registerPageGestures({
     required GestureNavigationController controller,
+    required Object owner,
     GestureConfirmCallback? onConfirm,
     GestureNextCallback? onNext,
     GestureBackCallback? onBack,
@@ -139,6 +130,7 @@ class GestureNavigationGuard {
     String? screenContext,
   }) {
     controller.registerPageActions(
+      owner: owner,
       onConfirm: onConfirm,
       onNext: onNext,
       onBack: onBack,
@@ -148,9 +140,10 @@ class GestureNavigationGuard {
   }
 
   static void unregisterPageGestures(
-    GestureNavigationController controller,
-  ) {
-    controller.clearActions();
+    GestureNavigationController controller, {
+    required Object owner,
+  }) {
+    controller.unregisterPageActions(owner);
   }
 
   static bool validateGestureExecution({
@@ -204,13 +197,10 @@ class GestureNavigationGuard {
 }
 
 /// Mixin opsional untuk page yang mau support gesture navigation.
-/// Nanti bisa dipakai di Home / Job Detail / Apply Job.
 mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
   late final GestureNavigationController gestureController;
 
-  void setupGestureNavigation({
-    String screenContext = 'unknown',
-  }) {
+  void setupGestureNavigation({String screenContext = 'unknown'}) {
     gestureController = GestureNavigationController();
     gestureController.setScreenContext(screenContext);
   }
@@ -224,6 +214,7 @@ mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
   }) {
     GestureNavigationGuard.registerPageGestures(
       controller: gestureController,
+      owner: this,
       onConfirm: onConfirm,
       onNext: onNext,
       onBack: onBack,
@@ -233,8 +224,10 @@ mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
   }
 
   void cleanupGestureNavigation() {
-    GestureNavigationGuard.unregisterPageGestures(gestureController);
-    gestureController.dispose();
+    GestureNavigationGuard.unregisterPageGestures(
+      gestureController,
+      owner: this,
+    );
   }
 
   void showGestureActionFeedback(GestureActionResult result) {

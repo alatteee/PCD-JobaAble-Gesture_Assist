@@ -3,6 +3,8 @@ import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
 import 'application_success_page.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/utils/gesture_navigation_guard.dart';
 
 class ApplyJobPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -22,6 +24,10 @@ class ApplyJobPage extends StatefulWidget {
 
 class _ApplyJobPageState extends State<ApplyJobPage> {
   final TextEditingController _messageController = TextEditingController();
+  final ScrollController _applyScrollController = ScrollController();
+  final GestureNavigationController _gestureNavigationController =
+      GestureNavigationController();
+
   bool _isSubmitting = false;
   int _messageLength = 0;
 
@@ -36,12 +42,103 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         _messageLength = _messageController.text.length;
       });
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerGestureActions();
+    });
   }
 
   @override
   void dispose() {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+    _applyScrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  void _registerGestureActions() {
+    if (!mounted) return;
+
+    GestureNavigationGuard.registerPageGestures(
+      controller: _gestureNavigationController,
+      owner: this,
+      screenContext: 'apply_job',
+      scrollController: _applyScrollController,
+      onNext: _handleGestureScrollApply,
+      onBack: _handleGestureBack,
+      onConfirm: _handleGestureSubmit,
+    );
+
+    _gestureNavigationController.printStatus();
+  }
+
+  Future<bool> _handleGestureScrollApply() async {
+    if (!mounted) return false;
+
+    if (!_applyScrollController.hasClients) {
+      _showCustomSnackBar(
+        'Form belum siap discroll',
+        icon: Icons.warning_amber_rounded,
+      );
+      return false;
+    }
+
+    final currentOffset = _applyScrollController.offset;
+    final maxOffset = _applyScrollController.position.maxScrollExtent;
+
+    if (currentOffset >= maxOffset) {
+      _showCustomSnackBar(
+        'Sudah berada di bagian paling bawah',
+        icon: Icons.info_outline,
+      );
+      return false;
+    }
+
+    final nextOffset = (currentOffset + 320.0).clamp(0.0, maxOffset);
+
+    await _applyScrollController.animateTo(
+      nextOffset,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeInOut,
+    );
+
+    _showCustomSnackBar(
+      'Scroll form lamaran',
+      icon: Icons.check_circle_rounded,
+    );
+    return true;
+  }
+
+  Future<bool> _handleGestureBack() async {
+    if (!mounted) return false;
+
+    final popped = await Navigator.maybePop(context);
+
+    if (!popped && mounted) {
+      _showCustomSnackBar(
+        'Tidak ada halaman sebelumnya untuk kembali',
+        icon: Icons.warning_amber_rounded,
+      );
+    }
+
+    return popped;
+  }
+
+  Future<bool> _handleGestureSubmit() async {
+    if (!mounted) return false;
+
+    if (_isSubmitting) {
+      _showCustomSnackBar(
+        'Lamaran sedang diproses',
+        icon: Icons.hourglass_bottom,
+      );
+      return false;
+    }
+
+    return _submitApplication();
   }
 
   String get _jobId => MongoService.getMongoId(widget.job['_id']);
@@ -115,8 +212,8 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
     );
   }
 
-  Future<void> _submitApplication() async {
-    if (_isSubmitting) return;
+  Future<bool> _submitApplication() async {
+    if (_isSubmitting) return false;
 
     final message = _messageController.text.trim();
 
@@ -125,15 +222,17 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         'Data pengguna atau lowongan tidak valid',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
-    if (_fullName.trim().isEmpty || _email.trim().isEmpty || _phone.trim().isEmpty) {
+    if (_fullName.trim().isEmpty ||
+        _email.trim().isEmpty ||
+        _phone.trim().isEmpty) {
       _showCustomSnackBar(
         'Data diri belum lengkap',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
     if (message.length > _maxMessageLength) {
@@ -141,84 +240,99 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         'Pesan maksimal 100 karakter',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
     setState(() {
       _isSubmitting = true;
     });
 
-    final alreadyApplied = await MongoService.hasAppliedJob(
-      userId: _userId,
-      jobId: _jobId,
-    );
-
-    if (!mounted) return;
-
-    if (alreadyApplied) {
-      setState(() {
-        _isSubmitting = false;
-      });
-      _showCustomSnackBar(
-        'Kamu sudah pernah melamar lowongan ini',
-        icon: Icons.info_outline,
+    try {
+      final alreadyApplied = await MongoService.hasAppliedJob(
+        userId: _userId,
+        jobId: _jobId,
       );
-      return;
-    }
 
-    final success = await MongoService.submitJobApplication(
-      applicationData: {
-        'user_id': _userId,
-        'job_id': _jobId,
-        'job_title': _jobTitle,
-        'company_name': _companyName,
-        'full_name': _fullName,
-        'email': _email,
-        'phone': _phone,
-        'message': message,
-        'status': 'pending',
-        'job_photo': widget.job['job_photo'], // Tambahkan ini agar foto tersimpan di koleksi lamaran
-        'sync_status': 'synced',
-        'created_at': DateTime.now().toUtc(),
-      },
-    );
+      if (!mounted) return false;
 
-    if (!mounted) return;
-
-    setState(() {
-      _isSubmitting = false;
-    });
-
-    if (success) {
-      // Trigger notification for company
-      final jobData = widget.job;
-      final companyId = jobData['company_id'];
-      
-      if (companyId != null) {
-        await MongoService.createNotification(
-          receiverId: companyId,
-          receiverRole: 'company',
-          senderId: _userId,
-          senderRole: 'job_seeker',
-          applicationId: '', // Will be updated on refresh if needed, or leave empty
-          jobId: _jobId,
-          title: 'Pelamar Baru',
-          message: '$_fullName telah melamar untuk posisi $_jobTitle.',
-          type: 'new_applicant',
+      if (alreadyApplied) {
+        _showCustomSnackBar(
+          'Kamu sudah pernah melamar lowongan ini',
+          icon: Icons.info_outline,
         );
+        return false;
       }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ApplicationSuccessPage(currentUser: widget.currentUser),
-        ),
+      final success = await MongoService.submitJobApplication(
+        applicationData: {
+          'user_id': _userId,
+          'job_id': _jobId,
+          'job_title': _jobTitle,
+          'company_name': _companyName,
+          'full_name': _fullName,
+          'email': _email,
+          'phone': _phone,
+          'message': message,
+          'status': 'pending',
+          'job_photo': widget.job['job_photo'],
+          'sync_status': 'synced',
+          'created_at': DateTime.now().toUtc(),
+        },
       );
-    } else {
+
+      if (!mounted) return false;
+
+      if (success) {
+        final jobData = widget.job;
+        final companyId = jobData['company_id'];
+
+        if (companyId != null) {
+          await MongoService.createNotification(
+            receiverId: companyId,
+            receiverRole: 'company',
+            senderId: _userId,
+            senderRole: 'job_seeker',
+            applicationId: '',
+            jobId: _jobId,
+            title: 'Pelamar Baru',
+            message: '$_fullName telah melamar untuk posisi $_jobTitle.',
+            type: 'new_applicant',
+          );
+        }
+
+        if (!mounted) return true;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ApplicationSuccessPage(
+              currentUser: widget.currentUser,
+            ),
+          ),
+        );
+
+        return true;
+      }
+
       _showCustomSnackBar(
         'Lamaran gagal dikirim',
         icon: Icons.error_outline,
       );
+      return false;
+    } catch (e) {
+      if (mounted) {
+        _showCustomSnackBar(
+          'Terjadi kesalahan saat mengirim lamaran',
+          icon: Icons.error_outline,
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
   }
 
@@ -237,11 +351,12 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
               padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
               child: _Header(
                 title: 'Lamar Sekarang',
-                onBack: () => Navigator.pop(context),
+                onBack: () => Navigator.maybePop(context),
               ),
             ),
             Expanded(
               child: SingleChildScrollView(
+                controller: _applyScrollController,
                 padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -313,7 +428,11 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
                       width: double.infinity,
                       height: 55,
                       child: ElevatedButton.icon(
-                        onPressed: _isSubmitting ? null : _submitApplication,
+                        onPressed: _isSubmitting
+                            ? null
+                            : () {
+                                _submitApplication();
+                              },
                         icon: _isSubmitting
                             ? SizedBox(
                                 width: 18,

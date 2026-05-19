@@ -3,6 +3,8 @@ import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../apply_job/apply_job_page.dart';
 import '../profile/profile_controller.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/utils/gesture_navigation_guard.dart';
 
 class JobDetailPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -21,10 +23,151 @@ class JobDetailPage extends StatefulWidget {
 class _JobDetailPageState extends State<JobDetailPage> {
   Map<String, dynamic>? userDetails;
 
+  final ScrollController _detailScrollController = ScrollController();
+  final GestureNavigationController _gestureNavigationController =
+      GestureNavigationController();
+
   @override
   void initState() {
     super.initState();
     _loadUserDetails();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerGestureActions();
+    });
+  }
+
+  @override
+  void dispose() {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+    _detailScrollController.dispose();
+    super.dispose();
+  }
+
+  void _registerGestureActions() {
+    if (!mounted) return;
+
+    GestureNavigationGuard.registerPageGestures(
+      controller: _gestureNavigationController,
+      owner: this,
+      screenContext: 'job_detail',
+      scrollController: _detailScrollController,
+      onNext: _handleGestureScrollDetail,
+      onBack: _handleGestureBack,
+      onConfirm: _handleGestureApply,
+    );
+
+    _gestureNavigationController.printStatus();
+  }
+
+  Future<bool> _handleGestureScrollDetail() async {
+    if (!mounted) return false;
+
+    if (!_detailScrollController.hasClients) {
+      _showGestureFeedback('Halaman belum siap discroll', isError: true);
+      return false;
+    }
+
+    final currentOffset = _detailScrollController.offset;
+    final maxOffset = _detailScrollController.position.maxScrollExtent;
+
+    if (currentOffset >= maxOffset) {
+      _showGestureFeedback('Sudah berada di bagian paling bawah', isError: true);
+      return false;
+    }
+
+    final nextOffset = (currentOffset + 320.0).clamp(0.0, maxOffset);
+
+    await _detailScrollController.animateTo(
+      nextOffset,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeInOut,
+    );
+
+    _showGestureFeedback('Scroll detail lowongan');
+    return true;
+  }
+
+  Future<bool> _handleGestureBack() async {
+    if (!mounted) return false;
+
+    final popped = await Navigator.maybePop(context);
+
+    if (!popped && mounted) {
+      _showGestureFeedback(
+        'Tidak ada halaman sebelumnya untuk kembali',
+        isError: true,
+      );
+    }
+
+    return popped;
+  }
+
+  Future<bool> _handleGestureApply() async {
+    if (!mounted) return false;
+
+    _showGestureFeedback('Membuka halaman lamar kerja');
+    await _openApplyPage();
+    return true;
+  }
+
+  Future<void> _openApplyPage() async {
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ApplyJobPage(
+          job: widget.job,
+          currentUser: widget.currentUser,
+          userDetails: userDetails ?? {},
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerGestureActions();
+    });
+  }
+
+  void _showGestureFeedback(
+    String message, {
+    bool isError = false,
+  }) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isError ? Colors.orange : const Color(0xFF16A34A),
+        duration: const Duration(milliseconds: 1500),
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.warning_amber_rounded : Icons.check_circle_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadUserDetails() async {
@@ -173,7 +316,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
         elevation: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: theme.colorScheme.primary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: Text(
           'Detail Lowongan',
@@ -194,6 +337,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
             ),
             Expanded(
               child: SingleChildScrollView(
+                controller: _detailScrollController,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 child: Column(
@@ -325,16 +469,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ApplyJobPage(
-                                job: widget.job,
-                                currentUser: widget.currentUser,
-                                userDetails: userDetails ?? {},
-                              ),
-                            ),
-                          );
+                          _openApplyPage();
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: theme.colorScheme.primary,
