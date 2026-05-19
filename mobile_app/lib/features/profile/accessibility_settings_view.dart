@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
+import '../gesture_assist/views/gesture_guide_page.dart';
 
 enum AccessibilityTextSize {
   small,
@@ -157,7 +158,8 @@ class AccessibilitySettingsView extends StatelessWidget {
         final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
         final mainColor =
             isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-        final textColor = isHighContrast ? AccessibilityTheme.yellow : Colors.black87;
+        final textColor =
+            isHighContrast ? AccessibilityTheme.yellow : Colors.black87;
         final cardColor =
             isHighContrast ? AccessibilityTheme.darkCard : const Color(0xFFDCE7FF);
 
@@ -274,12 +276,127 @@ class AccessibilitySettingsView extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 18),
+                  _GestureGuideMenu(
+                    isHighContrast: isHighContrast,
+                    mainColor: mainColor,
+                    textColor: textColor,
+                  ),
                 ],
               ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _GestureGuideMenu extends StatelessWidget {
+  final bool isHighContrast;
+  final Color mainColor;
+  final Color textColor;
+
+  const _GestureGuideMenu({
+    required this.isHighContrast,
+    required this.mainColor,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor =
+        isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+
+    final borderColor =
+        isHighContrast ? AccessibilityTheme.yellow : const Color(0xFFE2E8F0);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const GestureGuidePage(),
+          ),
+        );
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 18,
+        ),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(
+                isHighContrast ? 0.25 : 0.08,
+              ),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: isHighContrast
+                    ? AccessibilityTheme.black
+                    : AppColors.primaryNavy.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: isHighContrast
+                    ? Border.all(color: AccessibilityTheme.yellow)
+                    : null,
+              ),
+              child: Icon(
+                Icons.front_hand_rounded,
+                color: mainColor,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Panduan Gesture Assist',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Lihat panduan gesture sebelum menggunakan kamera.',
+                    style: TextStyle(
+                      color: isHighContrast
+                          ? AccessibilityTheme.yellow
+                          : AppColors.textGray,
+                      fontSize: 12.5,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: mainColor,
+              size: 26,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
