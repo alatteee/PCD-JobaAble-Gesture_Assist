@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
 import '../models/gesture_action_model.dart';
 import '../models/gesture_log_model.dart';
 import '../services/gesture_action_service.dart';
 import '../services/gesture_log_local_service.dart';
 
-/// Controller untuk Real Gesture Navigation
-/// Handles gesture detection dan execution dengan cooldown & stability check
+/// Controller utama untuk Gesture Navigation.
+/// Tugas:
+/// - cek mode ON/OFF dari local storage
+/// - cek confidence
+/// - cek stability
+/// - cek cooldown
+/// - cegah double trigger
+/// - execute callback halaman aktif
+/// - simpan log jika action berhasil
 class GestureNavigationController extends ChangeNotifier {
+  static const String _settingsBoxName = 'accessibilitySettings';
+  static const String _gestureNavigationModeKey = 'gestureNavigationMode';
+
   final GestureActionService _actionService = GestureActionService();
   final GestureLogLocalService _logService;
 
@@ -14,217 +26,383 @@ class GestureNavigationController extends ChangeNotifier {
     GestureLogLocalService? logService,
   }) : _logService = logService ?? GestureLogLocalService();
 
-  // State
   GestureActionResult? _lastActionResult;
   DateTime? _lastActionTime;
+
   bool _isEnabled = true;
+  bool _isExecuting = false;
 
-  // Settings
-  int _cooldownMs = 1500; // Cooldown antara actions
-  double _confidenceThreshold = 0.65; // Minimum confidence
+  int _cooldownMs = 1500;
+  double _confidenceThreshold = 0.65;
+  String _screenContext = 'unknown';
 
-  // Callback untuk feedback ke UI
   Function(GestureActionResult)? _onActionResult;
 
-  // Getters
   GestureActionResult? get lastActionResult => _lastActionResult;
   bool get isEnabled => _isEnabled;
+  bool get isExecuting => _isExecuting;
   int get cooldownMs => _cooldownMs;
   double get confidenceThreshold => _confidenceThreshold;
+  String get screenContext => _screenContext;
 
-  /// Set cooldown duration (milliseconds)
   void setCooldown(int ms) {
-    _cooldownMs = ms;
+    _cooldownMs = ms.clamp(300, 10000);
     notifyListeners();
   }
 
-  /// Register callback untuk action results (untuk UI feedback)
-  void onActionResult(Function(GestureActionResult) callback) {
-    _onActionResult = callback;
-  }
-
-  /// Set confidence threshold (0.0 - 1.0)
   void setConfidenceThreshold(double threshold) {
     _confidenceThreshold = threshold.clamp(0.0, 1.0);
     notifyListeners();
   }
 
-  /// Enable/disable gesture navigation
+  void setScreenContext(String screenContext) {
+    _screenContext = screenContext;
+  }
+
+  /// Manual enable/disable untuk controller.
+  /// Final decision tetap dicek juga dari Gesture Navigation Mode di Hive.
   void setEnabled(bool enabled) {
     _isEnabled = enabled;
+
     if (!enabled) {
       _actionService.clearCallbacks();
     }
+
     notifyListeners();
   }
 
-  /// Register callback untuk CONFIRM (Thumbs Up)
+  void onActionResult(Function(GestureActionResult) callback) {
+    _onActionResult = callback;
+  }
+
+  /// Register callback untuk CONFIRM (Thumbs Up).
   void registerConfirmAction(GestureConfirmCallback callback) {
     _actionService.onConfirmAction(callback);
   }
 
-  /// Register callback untuk NEXT (Open Palm)
+  /// Register callback untuk NEXT (Open Palm).
   void registerNextAction(GestureNextCallback callback) {
     _actionService.onNextAction(callback);
   }
 
-  /// Register callback untuk BACK (Fist)
+  /// Register callback untuk BACK (Fist).
   void registerBackAction(GestureBackCallback callback) {
     _actionService.onBackAction(callback);
   }
 
-  /// Register scroll controller untuk NEXT action (scroll down)
+  /// Register fallback ScrollController untuk NEXT.
   void setScrollController(ScrollController controller) {
     _actionService.setScrollController(controller);
   }
 
-  /// Clear semua registered actions
+  /// Helper untuk register semua action halaman sekaligus.
+  void registerPageActions({
+    GestureConfirmCallback? onConfirm,
+    GestureNextCallback? onNext,
+    GestureBackCallback? onBack,
+    ScrollController? scrollController,
+    String? screenContext,
+  }) {
+    if (screenContext != null) {
+      setScreenContext(screenContext);
+    }
+
+    if (onConfirm != null) {
+      registerConfirmAction(onConfirm);
+    }
+
+    if (onNext != null) {
+      registerNextAction(onNext);
+    }
+
+    if (onBack != null) {
+      registerBackAction(onBack);
+    }
+
+    if (scrollController != null) {
+      setScrollController(scrollController);
+    }
+  }
+
+  /// Clear semua registered actions.
   void clearActions() {
     _actionService.clearCallbacks();
+    _screenContext = 'unknown';
   }
 
-  /// Check apakah gesture action bisa dijalankan (cooldown check)
-  bool _canExecuteAction() {
-    if (!_isEnabled) return false;
+  Future<bool> _isGestureNavigationModeEnabled() async {
+    try {
+      final Box<dynamic> box;
 
-    final now = DateTime.now();
-    if (_lastActionTime != null) {
-      final timeSinceLastAction = now.difference(_lastActionTime!).inMilliseconds;
-      if (timeSinceLastAction < _cooldownMs) {
-        return false;
+      if (Hive.isBoxOpen(_settingsBoxName)) {
+        box = Hive.box<dynamic>(_settingsBoxName);
+      } else {
+        box = await Hive.openBox<dynamic>(_settingsBoxName);
       }
+
+      return box.get(
+            _gestureNavigationModeKey,
+            defaultValue: false,
+          ) ==
+          true;
+    } catch (e) {
+      debugPrint('[GestureNavigation] Failed to read gesture mode: $e');
+      return false;
     }
-    return true;
   }
 
-  /// Handle gesture action dengan safety checks
-  /// confidence: nilai 0.0 - 1.0 dari detector
-  /// isStable: apakah gesture sudah stabil dari stabilityHelper
+  bool _isCooldownActive() {
+    if (_lastActionTime == null) return false;
+
+    final elapsedMs =
+        DateTime.now().difference(_lastActionTime!).inMilliseconds;
+
+    return elapsedMs < _cooldownMs;
+  }
+
+  int _remainingCooldownMs() {
+    if (_lastActionTime == null) return 0;
+
+    final elapsedMs =
+        DateTime.now().difference(_lastActionTime!).inMilliseconds;
+
+    final remaining = _cooldownMs - elapsedMs;
+    return remaining <= 0 ? 0 : remaining;
+  }
+
   Future<GestureActionResult> handleGestureAction({
     required GestureActionType type,
     required double confidence,
     required bool isStable,
     BuildContext? context,
+    String? screenContext,
   }) async {
-    // Safety check: tidak aktif
+    if (screenContext != null) {
+      _screenContext = screenContext;
+    }
+
     if (!_isEnabled) {
-      final result = GestureActionResult(
-        type: type,
-        status: ActionStatus.skipped,
-        message: 'Gesture Navigation sedang non-aktif',
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.skipped,
+          message: 'Gesture navigation controller nonaktif',
+        ),
+        shouldNotify: true,
       );
-      _setActionResult(result);
-      notifyListeners();
-      return result;
     }
 
-    // Check confidence
+    final gestureModeEnabled = await _isGestureNavigationModeEnabled();
+
+    if (!gestureModeEnabled) {
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.skipped,
+          message: 'Gesture Navigation Mode nonaktif',
+        ),
+        shouldNotify: true,
+      );
+    }
+
+    if (type == GestureActionType.unknown) {
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.skipped,
+          message: 'Gesture tidak dikenali',
+        ),
+        shouldNotify: true,
+      );
+    }
+
     if (confidence < _confidenceThreshold) {
-      final result = GestureActionResult(
-        type: type,
-        status: ActionStatus.notReady,
-        message:
-            'Confidence terlalu rendah: ${confidence.toStringAsFixed(2)} < $_confidenceThreshold',
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.notReady,
+          message:
+              'Confidence terlalu rendah (${confidence.toStringAsFixed(2)})',
+        ),
+        shouldNotify: true,
       );
-      _setActionResult(result);
-      notifyListeners();
-      return result;
     }
 
-    // Check stability
     if (!isStable) {
-      final result = GestureActionResult(
-        type: type,
-        status: ActionStatus.notReady,
-        message: 'Gesture belum stabil',
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.notReady,
+          message: 'Gesture belum stabil',
+        ),
+        shouldNotify: true,
       );
-      _setActionResult(result);
-      notifyListeners();
-      return result;
     }
 
-    // Check cooldown
-    if (!_canExecuteAction()) {
-      final timeSinceLastAction =
-          DateTime.now().difference(_lastActionTime!).inMilliseconds;
-      final result = GestureActionResult(
-        type: type,
-        status: ActionStatus.notReady,
-        message:
-            'Cooldown aktif: tunggu ${_cooldownMs - timeSinceLastAction}ms',
+    if (_isExecuting) {
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.notReady,
+          message: 'Gesture sedang diproses',
+        ),
+        shouldNotify: true,
       );
-      _setActionResult(result);
-      notifyListeners();
-      return result;
     }
 
-    // Execute action
-    GestureActionResult result;
+    if (_isCooldownActive()) {
+      return _finishAction(
+        GestureActionResult(
+          type: type,
+          status: ActionStatus.notReady,
+          message: 'Gesture sedang cooldown (${_remainingCooldownMs()}ms)',
+        ),
+        shouldNotify: true,
+      );
+    }
+
+    _isExecuting = true;
+    notifyListeners();
+
+    try {
+      final result = await _executeAction(
+        type: type,
+        context: context,
+      );
+
+      _setActionResult(result);
+
+      if (result.isSuccess) {
+        _lastActionTime = DateTime.now();
+
+        await _saveSuccessLog(
+          type: type,
+          confidence: confidence,
+          result: result,
+        );
+
+        debugPrint('[GestureNavigation] Action success: ${result.message}');
+      } else {
+        debugPrint('[GestureNavigation] Action ignored/failed: ${result.message}');
+      }
+
+      return result;
+    } catch (e) {
+      final result = GestureActionResult(
+        type: type,
+        status: ActionStatus.failed,
+        message: 'Gagal menjalankan gesture action: $e',
+      );
+
+      _setActionResult(result);
+      return result;
+    } finally {
+      _isExecuting = false;
+      notifyListeners();
+    }
+  }
+
+  Future<GestureActionResult> _executeAction({
+    required GestureActionType type,
+    BuildContext? context,
+  }) async {
     switch (type) {
       case GestureActionType.confirm:
-        result = await _actionService.executeConfirm();
-        break;
+        return _actionService.executeConfirm();
       case GestureActionType.next:
-        result = await _actionService.executeNext();
-        break;
+        return _actionService.executeNext();
       case GestureActionType.back:
-        result = await _actionService.executeBack(context);
-        break;
+        return _actionService.executeBack(context);
       case GestureActionType.unknown:
-        result = GestureActionResult(
+        return GestureActionResult(
           type: type,
-          status: ActionStatus.failed,
-          message: 'Gesture type unknown',
+          status: ActionStatus.skipped,
+          message: 'Gesture tidak dikenali',
         );
     }
+  }
 
-    // Update state
+  Future<void> _saveSuccessLog({
+    required GestureActionType type,
+    required double confidence,
+    required GestureActionResult result,
+  }) async {
+    try {
+      final actionName = _actionNameFromType(type);
+
+      final log = GestureLogModel(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        userId: 'default_user',
+        gestureType: _gestureNameFromType(type),
+        action: actionName,
+        confidence: confidence,
+        screenContext: _screenContext,
+        timestamp: DateTime.now(),
+        syncStatus: 'pending',
+      );
+
+      await _logService.saveGestureLog(log);
+    } catch (e) {
+      debugPrint('[GestureNavigation] Failed to save gesture log: $e');
+    }
+  }
+
+  String _gestureNameFromType(GestureActionType type) {
+    switch (type) {
+      case GestureActionType.next:
+        return 'open_palm';
+      case GestureActionType.back:
+        return 'fist';
+      case GestureActionType.confirm:
+        return 'thumbs_up';
+      case GestureActionType.unknown:
+        return 'unknown';
+    }
+  }
+
+  String _actionNameFromType(GestureActionType type) {
+    switch (type) {
+      case GestureActionType.next:
+        return 'next';
+      case GestureActionType.back:
+        return 'back';
+      case GestureActionType.confirm:
+        return 'confirm';
+      case GestureActionType.unknown:
+        return 'unknown';
+    }
+  }
+
+  GestureActionResult _finishAction(
+    GestureActionResult result, {
+    bool shouldNotify = false,
+  }) {
     _setActionResult(result);
-    _lastActionTime = DateTime.now();
 
-    // Log action jika berhasil
-    if (result.isSuccess) {
-      try {
-        final log = GestureLogModel(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          userId: 'default_user', // TODO: Get from auth/user context
-          gestureType: type.toString().split('.').last,
-          action: type.toString().split('.').last,
-          confidence: confidence,
-          screenContext: 'gesture_navigation',
-          timestamp: DateTime.now(),
-          syncStatus: 'pending',
-        );
-        await _logService.saveGestureLog(log);
-      } catch (e) {
-        print('[GestureNavigation] ⚠️ Failed to save log: $e');
-      }
-      print('[GestureNavigation] ✅ Action successful: ${result.message}');
-    } else {
-      print('[GestureNavigation] ❌ Action failed: ${result.message}');
+    if (shouldNotify) {
+      notifyListeners();
     }
 
-    notifyListeners();
     return result;
   }
 
-  /// Helper untuk set result dan trigger callback UI
   void _setActionResult(GestureActionResult result) {
     _lastActionResult = result;
     _onActionResult?.call(result);
   }
 
-  /// Debug helper
   void printStatus() {
-    print('[GestureNavigation] === Status ===');
-    print('[GestureNavigation] Enabled: $_isEnabled');
-    print('[GestureNavigation] Cooldown: $_cooldownMs ms');
-    print('[GestureNavigation] Confidence Threshold: $_confidenceThreshold');
-    print(
+    debugPrint('[GestureNavigation] === Status ===');
+    debugPrint('[GestureNavigation] Enabled: $_isEnabled');
+    debugPrint('[GestureNavigation] Executing: $_isExecuting');
+    debugPrint('[GestureNavigation] Cooldown: $_cooldownMs ms');
+    debugPrint('[GestureNavigation] Confidence: $_confidenceThreshold');
+    debugPrint('[GestureNavigation] Screen Context: $_screenContext');
+    debugPrint(
       '[GestureNavigation] Last Action: ${_lastActionResult?.type} - ${_lastActionResult?.status}',
     );
-    print('[GestureNavigation] Last Action Time: $_lastActionTime');
-    print('[GestureNavigation] ==================');
+    debugPrint('[GestureNavigation] Last Action Time: $_lastActionTime');
+    debugPrint('[GestureNavigation] =================');
     _actionService.printRegisteredCallbacks();
   }
 

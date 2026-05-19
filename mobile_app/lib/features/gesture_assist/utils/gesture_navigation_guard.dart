@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
-import '../models/gesture_action_model.dart';
-import '../controllers/gesture_navigation_controller.dart';
+import 'package:flutter/services.dart';
 
-/// Guard untuk safety & utility dalam Gesture Navigation
-/// Provides helper methods dan warnings untuk safe gesture handling
+import '../controllers/gesture_navigation_controller.dart';
+import '../models/gesture_action_model.dart';
+
+/// Guard/helper untuk integrasi gesture navigation di halaman JobAble.
 class GestureNavigationGuard {
-  /// Safety wrapper untuk execute gesture action
-  /// Ensures context safety dan proper error handling
   static Future<GestureActionResult?> safeExecuteAction({
     required GestureNavigationController controller,
     required GestureActionType type,
     required double confidence,
     required bool isStable,
     BuildContext? context,
+    String? screenContext,
     VoidCallback? onSuccess,
     VoidCallback? onFail,
+    bool showFeedback = true,
   }) async {
     try {
       final result = await controller.handleGestureAction(
@@ -22,69 +23,136 @@ class GestureNavigationGuard {
         confidence: confidence,
         isStable: isStable,
         context: context,
+        screenContext: screenContext,
       );
 
-      if (result.isSuccess && onSuccess != null) {
-        onSuccess();
-      } else if (result.isFailed && onFail != null) {
-        onFail();
+      if (context != null && context.mounted && showFeedback) {
+        showActionFeedback(context, result);
+      }
+
+      if (result.isSuccess) {
+        HapticFeedback.lightImpact();
+        onSuccess?.call();
+      } else if (result.isFailed) {
+        onFail?.call();
       }
 
       return result;
     } catch (e) {
-      print('[GestureNavigationGuard] ❌ Error executing action: $e');
+      debugPrint('[GestureNavigationGuard] Error executing action: $e');
       onFail?.call();
+
+      if (context != null && context.mounted && showFeedback) {
+        showErrorFeedback(context, 'Gagal menjalankan gesture action');
+      }
+
       return null;
     }
   }
 
-  /// Show feedback dialog untuk gesture action result
   static void showActionFeedback(
     BuildContext context,
     GestureActionResult result,
   ) {
-    final color = result.isSuccess ? Colors.green : Colors.red;
-    final icon = result.isSuccess ? '✅' : '❌';
+    Color color;
+    IconData icon;
 
+    if (result.isSuccess) {
+      color = const Color(0xFF16A34A);
+      icon = Icons.check_circle_rounded;
+    } else if (result.isNotReady) {
+      color = Colors.orange;
+      icon = Icons.hourglass_bottom_rounded;
+    } else if (result.isSkipped) {
+      color = Colors.orange;
+      icon = Icons.info_rounded;
+    } else {
+      color = Colors.red;
+      icon = Icons.error_rounded;
+    }
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$icon ${result.message ?? 'Action'}'),
+        behavior: SnackBarBehavior.floating,
         backgroundColor: color,
         duration: const Duration(milliseconds: 1500),
+        content: Row(
+          children: [
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                result.message ?? 'Gesture action',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  /// Register gesture actions untuk specific page dengan callbacks
+  static void showSuccessFeedback(
+    BuildContext context,
+    String message,
+  ) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF16A34A),
+        duration: const Duration(milliseconds: 1500),
+        content: Text(message),
+      ),
+    );
+  }
+
+  static void showErrorFeedback(
+    BuildContext context,
+    String message,
+  ) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red,
+        duration: const Duration(milliseconds: 1500),
+        content: Text(message),
+      ),
+    );
+  }
+
   static void registerPageGestures({
     required GestureNavigationController controller,
     GestureConfirmCallback? onConfirm,
     GestureNextCallback? onNext,
     GestureBackCallback? onBack,
     ScrollController? scrollController,
+    String? screenContext,
   }) {
-    if (onConfirm != null) {
-      controller.registerConfirmAction(onConfirm);
-    }
-    if (onNext != null) {
-      controller.registerNextAction(onNext);
-    }
-    if (onBack != null) {
-      controller.registerBackAction(onBack);
-    }
-    if (scrollController != null) {
-      controller.setScrollController(scrollController);
-    }
+    controller.registerPageActions(
+      onConfirm: onConfirm,
+      onNext: onNext,
+      onBack: onBack,
+      scrollController: scrollController,
+      screenContext: screenContext,
+    );
   }
 
-  /// Clear gesture actions untuk specific page (call in dispose)
   static void unregisterPageGestures(
     GestureNavigationController controller,
   ) {
     controller.clearActions();
   }
 
-  /// Validate jika gesture dapat dijalankan pada saat ini
   static bool validateGestureExecution({
     required double confidence,
     required double minimumConfidence,
@@ -92,24 +160,21 @@ class GestureNavigationGuard {
     int? timeSinceLastActionMs,
     required int cooldownMs,
   }) {
-    // Check confidence
     if (confidence < minimumConfidence) {
-      print(
-        '[GestureNavigationGuard] ⚠️ Confidence too low: $confidence < $minimumConfidence',
+      debugPrint(
+        '[GestureNavigationGuard] Confidence too low: $confidence < $minimumConfidence',
       );
       return false;
     }
 
-    // Check stability
     if (!isStable) {
-      print('[GestureNavigationGuard] ⚠️ Gesture not stable yet');
+      debugPrint('[GestureNavigationGuard] Gesture not stable yet');
       return false;
     }
 
-    // Check cooldown
     if (timeSinceLastActionMs != null && timeSinceLastActionMs < cooldownMs) {
-      print(
-        '[GestureNavigationGuard] ⚠️ Cooldown active: $timeSinceLastActionMs < $cooldownMs ms',
+      debugPrint(
+        '[GestureNavigationGuard] Cooldown active: $timeSinceLastActionMs < $cooldownMs ms',
       );
       return false;
     }
@@ -117,78 +182,63 @@ class GestureNavigationGuard {
     return true;
   }
 
-  /// Warning logger untuk non-fatal issues
   static void logWarning(String message) {
-    print('[GestureNavigationGuard] ⚠️ WARNING: $message');
+    debugPrint('[GestureNavigationGuard] WARNING: $message');
   }
 
-  /// Error logger
   static void logError(String message, [Object? error, StackTrace? trace]) {
-    print('[GestureNavigationGuard] ❌ ERROR: $message');
-    if (error != null) print('  Error: $error');
-    if (trace != null) print('  Trace: $trace');
+    debugPrint('[GestureNavigationGuard] ERROR: $message');
+
+    if (error != null) {
+      debugPrint('Error: $error');
+    }
+
+    if (trace != null) {
+      debugPrint('Trace: $trace');
+    }
   }
 
-  /// Info logger
   static void logInfo(String message) {
-    print('[GestureNavigationGuard] ℹ️ INFO: $message');
+    debugPrint('[GestureNavigationGuard] INFO: $message');
   }
 }
 
-/// Mixin untuk pages yang ingin support gesture navigation
-/// Usage:
-/// class MyPage extends StatefulWidget {
-///   @override
-///   State<MyPage> createState() => MyPageState();
-/// }
-/// 
-/// class MyPageState extends State<MyPage> with GestureNavigationMixin {
-///   @override
-///   void initState() {
-///     super.initState();
-///     setupGestureNavigation();
-///   }
-///   
-///   @override
-///   void dispose() {
-///     cleanupGestureNavigation();
-///     super.dispose();
-///   }
-/// }
-mixin GestureNavigationMixin on State {
-  late GestureNavigationController _gestureController;
+/// Mixin opsional untuk page yang mau support gesture navigation.
+/// Nanti bisa dipakai di Home / Job Detail / Apply Job.
+mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
+  late final GestureNavigationController gestureController;
 
-  GestureNavigationController get gestureController => _gestureController;
-
-  /// Override untuk setup gesture actions
-  void setupGestureNavigation() {
-    _gestureController = GestureNavigationController();
+  void setupGestureNavigation({
+    String screenContext = 'unknown',
+  }) {
+    gestureController = GestureNavigationController();
+    gestureController.setScreenContext(screenContext);
   }
 
-  /// Register gesture actions di page
   void registerGestureActions({
     GestureConfirmCallback? onConfirm,
     GestureNextCallback? onNext,
     GestureBackCallback? onBack,
     ScrollController? scrollController,
+    String? screenContext,
   }) {
     GestureNavigationGuard.registerPageGestures(
-      controller: _gestureController,
+      controller: gestureController,
       onConfirm: onConfirm,
       onNext: onNext,
       onBack: onBack,
       scrollController: scrollController,
+      screenContext: screenContext,
     );
   }
 
-  /// Cleanup gesture actions saat page ditutup
   void cleanupGestureNavigation() {
-    GestureNavigationGuard.unregisterPageGestures(_gestureController);
-    _gestureController.dispose();
+    GestureNavigationGuard.unregisterPageGestures(gestureController);
+    gestureController.dispose();
   }
 
-  /// Show feedback untuk action result (gunakan dalam callback action)
   void showGestureActionFeedback(GestureActionResult result) {
+    if (!mounted) return;
     GestureNavigationGuard.showActionFeedback(context, result);
   }
 }
