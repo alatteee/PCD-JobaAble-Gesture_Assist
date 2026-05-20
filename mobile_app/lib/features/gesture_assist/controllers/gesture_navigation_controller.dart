@@ -271,7 +271,7 @@ class GestureNavigationController extends ChangeNotifier {
         result = await _actionService.executeNext();
         break;
       case GestureActionType.back:
-        result = await _actionService.executeBack(context);
+        result = await _actionService.executeBack(null);
         break;
       case GestureActionType.unknown:
         result = GestureActionResult(
