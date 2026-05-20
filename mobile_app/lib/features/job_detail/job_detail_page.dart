@@ -5,6 +5,7 @@ import '../apply_job/apply_job_page.dart';
 import '../profile/profile_controller.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class JobDetailPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -30,6 +31,14 @@ class _JobDetailPageState extends State<JobDetailPage> {
   @override
   void initState() {
     super.initState();
+    
+    // Set userId untuk gesture logging
+    final userId = widget.currentUser['_id']?.toString() ??
+        widget.currentUser['id']?.toString() ??
+        widget.currentUser['user_id']?.toString() ??
+        '';
+    _gestureNavigationController.setUserId(userId);
+    
     _loadUserDetails();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -184,28 +193,109 @@ class _JobDetailPageState extends State<JobDetailPage> {
     });
   }
 
+  String _textValue(dynamic value, String fallback) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) return fallback;
+    return text;
+  }
+
+  String _getJobTitle() {
+    return _textValue(
+      widget.job['title'] ?? widget.job['job_title'],
+      '-',
+    );
+  }
+
+  String _getJobType() {
+    return _textValue(
+      widget.job['job_type'] ?? widget.job['type'],
+      '-',
+    );
+  }
+
+  Widget _buildJobPhoto({
+    required BuildContext context,
+    required dynamic photo,
+    required bool isDark,
+  }) {
+    final theme = Theme.of(context);
+    final photoText = photo?.toString().trim() ?? '';
+
+    Widget placeholder() {
+      return Container(
+        height: 56,
+        width: 56,
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.yellow.withOpacity(0.1)
+              : AppColors.primaryNavy.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Icon(
+          Icons.business_center_rounded,
+          color: theme.colorScheme.primary,
+          size: 36,
+        ),
+      );
+    }
+
+    if (photoText.isEmpty) {
+      return placeholder();
+    }
+
+    if (photoText.startsWith('http://') || photoText.startsWith('https://')) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.network(
+          photoText,
+          height: 56,
+          width: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    }
+
+    try {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.memory(
+          base64Decode(photoText),
+          height: 56,
+          width: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    } catch (e) {
+      return placeholder();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final String title = widget.job['title'] ?? '-';
-    final String company = widget.job['company_name'] ?? '-';
-    final String location = widget.job['location'] ?? '-';
-    final String jobType = widget.job['job_type'] ?? '-';
-    final String description =
-        widget.job['description'] ?? 'Tidak ada deskripsi.';
-    final String? jobPhoto = widget.job['job_photo'];
+    final String title = _getJobTitle();
+    final String company = _textValue(widget.job['company_name'], '-');
+    final String location = _textValue(widget.job['location'], '-');
+    final String jobType = _getJobType();
+    final String description = _textValue(
+      widget.job['description'],
+      'Tidak ada deskripsi.',
+    );
+    final dynamic jobPhoto = widget.job['job_photo'];
 
     final List qualifications = (widget.job['qualification'] is List)
         ? widget.job['qualification']
         : (widget.job['qualification'] is String &&
-                widget.job['qualification'].isNotEmpty)
-            ? widget.job['qualification'].split('\n')
+                widget.job['qualification'].toString().isNotEmpty)
+            ? widget.job['qualification'].toString().split('\n')
             : [];
 
     final List facilities = (widget.job['facilities'] is List)
         ? widget.job['facilities']
         : (widget.job['facilities'] is String &&
-                widget.job['facilities'].isNotEmpty)
-            ? widget.job['facilities'].split(',')
+                widget.job['facilities'].toString().isNotEmpty)
+            ? widget.job['facilities'].toString().split(',')
             : [];
 
     IconData getFacilityIcon(String name) {
@@ -220,31 +310,14 @@ class _JobDetailPageState extends State<JobDetailPage> {
     Widget jobHeader() {
       final theme = Theme.of(context);
       final isDark = theme.brightness == Brightness.dark;
+
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 56,
-            width: 56,
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.yellow.withOpacity(0.1)
-                  : AppColors.primaryNavy.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(16),
-              image: jobPhoto != null
-                  ? DecorationImage(
-                      image: MemoryImage(base64Decode(jobPhoto)),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: jobPhoto == null
-                ? Icon(
-                    Icons.business_center_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 36,
-                  )
-                : null,
+          _buildJobPhoto(
+            context: context,
+            photo: jobPhoto,
+            isDark: isDark,
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -276,11 +349,15 @@ class _JobDetailPageState extends State<JobDetailPage> {
                       color: isDark ? Colors.yellow : AppColors.textGray,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      location,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.yellow : AppColors.textGray,
+                    Expanded(
+                      child: Text(
+                        location,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.yellow : AppColors.textGray,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -290,11 +367,15 @@ class _JobDetailPageState extends State<JobDetailPage> {
                       color: isDark ? Colors.yellow : AppColors.textGray,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      jobType,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.yellow : AppColors.textGray,
+                    Expanded(
+                      child: Text(
+                        jobType,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.yellow : AppColors.textGray,
+                        ),
                       ),
                     ),
                   ],
@@ -327,177 +408,190 @@ class _JobDetailPageState extends State<JobDetailPage> {
         ),
         centerTitle: false,
       ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: jobHeader(),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                controller: _detailScrollController,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Deskripsi Pekerjaan',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: theme.textTheme.bodyMedium?.color,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Kualifikasi Pekerjaan',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (qualifications.isEmpty)
-                      Text(
-                        'Tidak ada kualifikasi.',
-                        style: TextStyle(
-                          color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-                          fontSize: 14,
-                        ),
-                      )
-                    else
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: qualifications
-                            .map<Widget>(
-                              (q) => Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '• ',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      q.toString(),
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: theme.textTheme.bodyMedium?.color,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Fasilitas',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (facilities.isEmpty)
-                      Text(
-                        'Tidak ada fasilitas.',
-                        style: TextStyle(
-                          color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-                          fontSize: 14,
-                        ),
-                      )
-                    else
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: facilities
-                            .map<Widget>(
-                              (f) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: isDark ? Border.all(color: Colors.yellow.withOpacity(0.3)) : null,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      getFacilityIcon(f.toString()),
-                                      color: theme.colorScheme.primary,
-                                      size: 22,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      f.toString(),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: theme.colorScheme.primary,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    const SizedBox(height: 32),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          _openApplyPage();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          foregroundColor: isDark ? Colors.black : Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: isDark
-                                ? const BorderSide(color: Colors.yellow)
-                                : BorderSide.none,
-                          ),
-                        ),
-                        child: const Text(
-                          'Lamar Sekarang',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: jobHeader(),
                 ),
-              ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _detailScrollController,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Deskripsi Pekerjaan',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          description,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: theme.textTheme.bodyMedium?.color,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Kualifikasi Pekerjaan',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (qualifications.isEmpty)
+                          Text(
+                            'Tidak ada kualifikasi.',
+                            style: TextStyle(
+                              color:
+                                  theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+                              fontSize: 14,
+                            ),
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: qualifications
+                                .map<Widget>(
+                                  (q) => Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '• ',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          q.toString(),
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: theme.textTheme.bodyMedium?.color,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Fasilitas',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (facilities.isEmpty)
+                          Text(
+                            'Tidak ada fasilitas.',
+                            style: TextStyle(
+                              color:
+                                  theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+                              fontSize: 14,
+                            ),
+                          )
+                        else
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: facilities
+                                .map<Widget>(
+                                  (f) => Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          theme.colorScheme.primary.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: isDark
+                                          ? Border.all(
+                                              color: Colors.yellow.withOpacity(0.3),
+                                            )
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          getFacilityIcon(f.toString()),
+                                          color: theme.colorScheme.primary,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          f.toString(),
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: theme.colorScheme.primary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        const SizedBox(height: 32),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              _openApplyPage();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.colorScheme.primary,
+                              foregroundColor: isDark ? Colors.black : Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: isDark
+                                    ? const BorderSide(color: Colors.yellow)
+                                    : BorderSide.none,
+                              ),
+                            ),
+                            child: const Text(
+                              'Lamar Sekarang',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          // Floating Mini Camera Preview
+          const MiniCameraPreview(),
+        ],
       ),
     );
   }

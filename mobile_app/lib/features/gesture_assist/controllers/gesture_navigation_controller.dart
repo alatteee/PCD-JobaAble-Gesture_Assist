@@ -39,6 +39,7 @@ class GestureNavigationController extends ChangeNotifier {
   int _cooldownMs = 1500;
   double _confidenceThreshold = 0.65;
   String _screenContext = 'unknown';
+  String _userId = ''; // Untuk logging
 
   Function(GestureActionResult)? _onActionResult;
 
@@ -66,6 +67,10 @@ class GestureNavigationController extends ChangeNotifier {
   void setEnabled(bool enabled) {
     _isEnabled = enabled;
     notifyListeners();
+  }
+
+  void setUserId(String userId) {
+    _userId = userId;
   }
 
   void onActionResult(Function(GestureActionResult) callback) {
@@ -248,7 +253,7 @@ class GestureNavigationController extends ChangeNotifier {
         GestureActionResult(
           type: type,
           status: ActionStatus.notReady,
-          message: 'Gesture sedang cooldown (${_remainingCooldownMs()}ms)',
+          message: 'Gesture cooldown... (${_remainingCooldownMs()}ms)',
         ),
         shouldNotify: true,
       );
@@ -257,129 +262,73 @@ class GestureNavigationController extends ChangeNotifier {
     _isExecuting = true;
     notifyListeners();
 
-    try {
-      _actionService.printRegisteredCallbacks();
-
-      final result = await _executeAction(
-        type: type,
-        context: context,
-      );
-
-      _setActionResult(result);
-
-      if (result.isSuccess) {
-        _lastActionTime = DateTime.now();
-
-        await _saveSuccessLog(
-          type: type,
-          confidence: confidence,
-          result: result,
-        );
-
-        debugPrint('[GestureNavigation] Action success: ${result.message}');
-      } else {
-        debugPrint(
-          '[GestureNavigation] Action ignored/failed: ${result.message}',
-        );
-      }
-
-      return result;
-    } catch (e) {
-      final result = GestureActionResult(
-        type: type,
-        status: ActionStatus.failed,
-        message: 'Gagal menjalankan gesture action: $e',
-      );
-
-      _setActionResult(result);
-      return result;
-    } finally {
-      _isExecuting = false;
-      notifyListeners();
-    }
-  }
-
-  Future<GestureActionResult> _executeAction({
-    required GestureActionType type,
-    BuildContext? context,
-  }) async {
+    GestureActionResult result;
     switch (type) {
       case GestureActionType.confirm:
-        return _actionService.executeConfirm();
+        result = await _actionService.executeConfirm();
+        break;
       case GestureActionType.next:
-        return _actionService.executeNext();
+        result = await _actionService.executeNext();
+        break;
       case GestureActionType.back:
-        return _actionService.executeBack(context);
+        result = await _actionService.executeBack(context);
+        break;
       case GestureActionType.unknown:
-        return GestureActionResult(
+        result = GestureActionResult(
           type: type,
           status: ActionStatus.skipped,
           message: 'Gesture tidak dikenali',
         );
+        break;
     }
+
+    if (result.isSuccess) {
+      _lastActionTime = DateTime.now();
+      await _saveLog(type, confidence);
+    }
+
+    return _finishAction(result);
   }
 
-  Future<void> _saveSuccessLog({
-    required GestureActionType type,
-    required double confidence,
-    required GestureActionResult result,
-  }) async {
-    try {
-      final actionName = _actionNameFromType(type);
-
-      final log = GestureLogModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        userId: 'default_user',
-        gestureType: _gestureNameFromType(type),
-        action: actionName,
-        confidence: confidence,
-        screenContext: _actionService.activeScreenContext,
-        timestamp: DateTime.now(),
-        syncStatus: 'pending',
-      );
-
-      await _logService.saveGestureLog(log);
-    } catch (e) {
-      debugPrint('[GestureNavigation] Failed to save gesture log: $e');
-    }
+  Future<void> _saveLog(GestureActionType type, double confidence) async {
+    // Generate unique ID menggunakan timestamp + random suffix
+    final uniqueId = '${DateTime.now().millisecondsSinceEpoch}_${_screenContext}_${type.name}';
+    
+    final log = GestureLogModel(
+      id: uniqueId,
+      userId: _userId.isNotEmpty ? _userId : 'unknown',
+      gestureType: _actionTypeToGestureType(type),
+      action: type.name,
+      confidence: confidence,
+      screenContext: _screenContext,
+      timestamp: DateTime.now(),
+      syncStatus: 'pending',
+    );
+    await _logService.saveGestureLog(log);
   }
 
-  String _gestureNameFromType(GestureActionType type) {
+  String _actionTypeToGestureType(GestureActionType type) {
     switch (type) {
+      case GestureActionType.confirm:
+        return 'thumbs_up';
       case GestureActionType.next:
         return 'open_palm';
       case GestureActionType.back:
         return 'fist';
-      case GestureActionType.confirm:
-        return 'thumbs_up';
-      case GestureActionType.unknown:
-        return 'unknown';
-    }
-  }
-
-  String _actionNameFromType(GestureActionType type) {
-    switch (type) {
-      case GestureActionType.next:
-        return 'next';
-      case GestureActionType.back:
-        return 'back';
-      case GestureActionType.confirm:
-        return 'confirm';
-      case GestureActionType.unknown:
+      default:
         return 'unknown';
     }
   }
 
   GestureActionResult _finishAction(
     GestureActionResult result, {
-    bool shouldNotify = false,
+    bool shouldNotify = true,
   }) {
+    _isExecuting = false;
     _setActionResult(result);
-
     if (shouldNotify) {
       notifyListeners();
     }
-
     return result;
   }
 

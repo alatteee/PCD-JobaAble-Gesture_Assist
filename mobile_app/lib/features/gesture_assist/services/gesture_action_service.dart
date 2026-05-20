@@ -58,6 +58,7 @@ class GestureActionService {
     GestureBackCallback? onBack,
     ScrollController? scrollController,
   }) {
+    // Hapus registrasi lama dari owner yang sama untuk menghindari duplikat
     unregisterOwner(owner);
 
     _registrationStack.add(
@@ -78,10 +79,13 @@ class GestureActionService {
   }
 
   void unregisterOwner(Object owner) {
+    final initialLength = _registrationStack.length;
     _registrationStack.removeWhere((item) => identical(item.owner, owner));
-    debugPrint(
-      '[GestureActionService] Unregistered owner, stack=${_registrationStack.length}',
-    );
+    if (_registrationStack.length < initialLength) {
+      debugPrint(
+        '[GestureActionService] Unregistered owner, stack=${_registrationStack.length}',
+      );
+    }
   }
 
   /// Compatibility helper untuk kode lama.

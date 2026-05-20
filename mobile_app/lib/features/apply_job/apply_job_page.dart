@@ -5,6 +5,7 @@ import '../../services/mongo_service.dart';
 import 'application_success_page.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class ApplyJobPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -36,6 +37,13 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
   @override
   void initState() {
     super.initState();
+
+    // Set userId untuk gesture logging
+    final userId = widget.currentUser['_id']?.toString() ??
+        widget.currentUser['id']?.toString() ??
+        widget.currentUser['user_id']?.toString() ??
+        '';
+    _gestureNavigationController.setUserId(userId);
 
     _messageController.addListener(() {
       setState(() {
@@ -343,131 +351,138 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
-              child: _Header(
-                title: 'Lamar Sekarang',
-                onBack: () => Navigator.maybePop(context),
-              ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                controller: _applyScrollController,
-                padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _JobSummaryCard(
-                      title: _jobTitle,
-                      company: _companyName,
-                      location: _location,
-                      jobType: _jobType,
-                      jobPhoto: widget.job['job_photo'], // Tambahkan ini
-                    ),
-                    const SizedBox(height: 22),
-                    Text(
-                      'Data Diri',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Data Diambil dari profil kamu. Pastikan sudah benar.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _InfoField(
-                      icon: Icons.person,
-                      label: 'Nama Lengkap',
-                      value: _fullName.isEmpty ? '-' : _fullName,
-                    ),
-                    const SizedBox(height: 13),
-                    _InfoField(
-                      icon: Icons.email_outlined,
-                      label: 'Email',
-                      value: _email.isEmpty ? '-' : _email,
-                    ),
-                    const SizedBox(height: 13),
-                    _InfoField(
-                      icon: Icons.phone,
-                      label: 'No. Handphone',
-                      value: _phone.isEmpty ? '-' : _phone,
-                    ),
-                    const SizedBox(height: 26),
-                    Text(
-                      'Pesan untuk Perusahaan (Opsional)',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Tulis pesan singkat untuk memperkenalkan dirimu',
-                      style: TextStyle(fontSize: 11, color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray),
-                    ),
-                    const SizedBox(height: 12),
-                    _MessageBox(
-                      controller: _messageController,
-                      maxLength: _maxMessageLength,
-                      currentLength: _messageLength,
-                    ),
-                    const SizedBox(height: 26),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 55,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSubmitting
-                            ? null
-                            : () {
-                                _submitApplication();
-                              },
-                        icon: _isSubmitting
-                            ? SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
-                                ),
-                              )
-                            : Icon(Icons.send_outlined, color: isDark ? Colors.black : Colors.white, size: 24),
-                        label: Text(
-                          _isSubmitting ? 'Mengirim...' : 'Kirim Lamaran',
-                          style: TextStyle(
-                            color: isDark ? Colors.black : Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          disabledBackgroundColor: theme.colorScheme.primary.withOpacity(0.65),
-                          elevation: 4,
-                          shadowColor: Colors.black26,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+                  child: _Header(
+                    title: 'Lamar Sekarang',
+                    onBack: () => Navigator.maybePop(context),
+                  ),
                 ),
-              ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _applyScrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _JobSummaryCard(
+                          title: _jobTitle,
+                          company: _companyName,
+                          location: _location,
+                          jobType: _jobType,
+                          jobPhoto: widget.job['job_photo'], // Tambahkan ini
+                        ),
+                        const SizedBox(height: 22),
+                        Text(
+                          'Data Diri',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Data Diambil dari profil kamu. Pastikan sudah benar.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _InfoField(
+                          icon: Icons.person,
+                          label: 'Nama Lengkap',
+                          value: _fullName.isEmpty ? '-' : _fullName,
+                        ),
+                        const SizedBox(height: 13),
+                        _InfoField(
+                          icon: Icons.email_outlined,
+                          label: 'Email',
+                          value: _email.isEmpty ? '-' : _email,
+                        ),
+                        const SizedBox(height: 13),
+                        _InfoField(
+                          icon: Icons.phone,
+                          label: 'No. Handphone',
+                          value: _phone.isEmpty ? '-' : _phone,
+                        ),
+                        const SizedBox(height: 26),
+                        Text(
+                          'Pesan untuk Perusahaan (Opsional)',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Tulis pesan singkat untuk memperkenalkan dirimu',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray),
+                        ),
+                        const SizedBox(height: 12),
+                        _MessageBox(
+                          controller: _messageController,
+                          maxLength: _maxMessageLength,
+                          currentLength: _messageLength,
+                        ),
+                        const SizedBox(height: 26),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 55,
+                          child: ElevatedButton.icon(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () {
+                                    _submitApplication();
+                                  },
+                            icon: _isSubmitting
+                                ? SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                    ),
+                                  )
+                                : Icon(Icons.send_outlined, color: isDark ? Colors.black : Colors.white, size: 24),
+                            label: Text(
+                              _isSubmitting ? 'Mengirim...' : 'Kirim Lamaran',
+                              style: TextStyle(
+                                color: isDark ? Colors.black : Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.colorScheme.primary,
+                              disabledBackgroundColor: theme.colorScheme.primary.withOpacity(0.65),
+                              elevation: 4,
+                              shadowColor: Colors.black26,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          // Floating Mini Camera Preview
+          const MiniCameraPreview(),
+        ],
       ),
     );
   }

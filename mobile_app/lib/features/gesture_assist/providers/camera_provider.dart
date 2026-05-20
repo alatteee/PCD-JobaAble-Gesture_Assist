@@ -117,6 +117,10 @@ class CameraProvider extends ChangeNotifier {
       _detectionService.initializeRealDetector();
 
       _isInitialized = true;
+
+      // Auto-start image stream untuk gesture detection
+      _cameraService.startImageStream(_onImageStream);
+      debugPrint('✅ Image stream auto-started for gesture detection');
     } catch (e) {
       _errorMessage = e.toString();
       debugPrint('❌ CameraProvider initializeCamera error: $e');

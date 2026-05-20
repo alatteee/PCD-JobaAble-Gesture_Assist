@@ -13,6 +13,8 @@ import '../notifications/notification_page.dart';
 import '../cv/cv_view.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/widgets/gesture_status_indicator.dart';
+import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class HomePage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -58,6 +60,9 @@ class _HomePageState extends State<HomePage> {
     super.initState();
 
     _selectedIndex = widget.initialIndex.clamp(0, 3).toInt();
+
+    // Set userId untuk gesture logging
+    _gestureNavigationController.setUserId(_currentUserId);
 
     if (widget.showSuccessDialog) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -646,14 +651,27 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _selectedIndex == 0 ? _buildBerandaAppBar() : _buildOtherAppBar(),
-      body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: KeyedSubtree(
-            key: ValueKey<int>(_selectedIndex),
-            child: pages[_selectedIndex],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: KeyedSubtree(
+                key: ValueKey<int>(_selectedIndex),
+                child: pages[_selectedIndex],
+              ),
+            ),
           ),
-        ),
+          // Mini Camera Preview (Shows on all tabs of HomePage)
+          const MiniCameraPreview(),
+          
+          // Gesture detection status indicator
+          if (_selectedIndex == 0)
+            const GestureStatusIndicator(
+              gestureStatus: 'Ready',
+              isDetecting: false,
+            ),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -833,7 +851,7 @@ class _HomePageState extends State<HomePage> {
 
     return RefreshIndicator(
       color: theme.colorScheme.primary,
-      onRefresh: fetchJobs,
+      onRefresh: forceFreshFetch,
       child: SingleChildScrollView(
         controller: _homeScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -1165,14 +1183,88 @@ class _JobCard extends StatelessWidget {
     this.onSave,
   });
 
+  Widget _buildJobPhoto(dynamic photo) {
+    final photoText = photo?.toString().trim() ?? '';
+
+    Widget placeholder() {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: isHighContrast
+              ? Colors.yellow.withOpacity(0.3)
+              : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          Icons.business,
+          color: isHighContrast
+              ? AccessibilityTheme.yellow
+              : Colors.grey.shade400,
+        ),
+      );
+    }
+
+    if (photoText.isEmpty) {
+      return placeholder();
+    }
+
+    // Untuk data stress test: job_photo berupa URL https://picsum.photos/...
+    if (photoText.startsWith('http://') || photoText.startsWith('https://')) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          photoText,
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    }
+
+    // Untuk data lama/asli: job_photo berupa base64
+    try {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          base64Decode(photoText),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    } catch (e) {
+      return placeholder();
+    }
+  }
+
+  String _getJobTitle() {
+    return job['title']?.toString() ??
+        job['job_title']?.toString() ??
+        'Tanpa Judul';
+  }
+
+  String _getJobType() {
+    return job['job_type']?.toString() ??
+        job['type']?.toString() ??
+        'Tipe tidak diketahui';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cardColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
-    final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final cardColor =
+        isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final textColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
     final subTextColor = isHighContrast ? Colors.white70 : Colors.black54;
-    final buttonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-    final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
-    final outlineButtonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonTextColor =
+        isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final outlineButtonColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1197,40 +1289,14 @@ class _JobCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              if (job['job_photo'] != null &&
-                  job['job_photo'].toString().isNotEmpty)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    base64Decode(job['job_photo']),
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const Icon(Icons.business),
-                  ),
-                ),
-              if (job['job_photo'] == null ||
-                  job['job_photo'].toString().isEmpty)
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: isHighContrast ? Colors.yellow.withOpacity(0.3) : Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.business,
-                    color: isHighContrast ? AccessibilityTheme.yellow : Colors.grey.shade400,
-                  ),
-                ),
+              _buildJobPhoto(job['job_photo']),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      job['title'] ?? 'Tanpa Judul',
+                      _getJobTitle(),
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -1255,16 +1321,24 @@ class _JobCard extends StatelessWidget {
             children: [
               Icon(Icons.location_on, color: subTextColor, size: 16),
               const SizedBox(width: 4),
-              Text(
-                job['location'] ?? 'Lokasi tidak diketahui',
-                style: TextStyle(color: subTextColor),
+              Expanded(
+                child: Text(
+                  job['location'] ?? 'Lokasi tidak diketahui',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: subTextColor),
+                ),
               ),
               const SizedBox(width: 16),
               Icon(Icons.work, color: subTextColor, size: 16),
               const SizedBox(width: 4),
-              Text(
-                job['job_type'] ?? 'Tipe tidak diketahui',
-                style: TextStyle(color: subTextColor),
+              Expanded(
+                child: Text(
+                  _getJobType(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: subTextColor),
+                ),
               ),
             ],
           ),
@@ -1297,7 +1371,7 @@ class _JobCard extends StatelessWidget {
                   onPressed: onSave,
                   icon: Icon(
                     isSaved ? Icons.bookmark : Icons.bookmark_border,
-                    color: isSaved ? buttonTextColor : buttonTextColor,
+                    color: buttonTextColor,
                   ),
                   label: Text(isSaved ? 'Tersimpan' : 'Simpan'),
                   style: ElevatedButton.styleFrom(

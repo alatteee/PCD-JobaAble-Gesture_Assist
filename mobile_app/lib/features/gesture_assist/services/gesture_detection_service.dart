@@ -157,7 +157,10 @@ class GestureDetectionService {
     );
 
     if (gestureNavigationController != null) {
+      debugPrint('📤 [GestureDetection] Calling handleGestureAction via NavigationController');
+      
       final actionType = _gestureTypeToActionType(result.gestureType);
+      debugPrint('📊 [GestureDetection] ActionType: $actionType, Confidence: ${result.confidence}');
 
       final actionResult = await gestureNavigationController!.handleGestureAction(
         type: actionType,
@@ -166,17 +169,16 @@ class GestureDetectionService {
         context: null,
       );
 
-      // Jangan jadikan log throttle sebagai syarat action.
-      // Action harus tetap bisa jalan selama stable/cooldown controller lolos.
-      // Log raw gesture_camera_page hanya disimpan jika action belum dilog oleh
-      // GestureNavigationController atau saat memakai fallback controller.
-      if (actionResult.isSuccess && _shouldLogGesture(result)) {
-        _updateLastLoggedGesture(result);
-      }
-
+      debugPrint('✅ [GestureDetection] Action executed: ${actionResult.message}');
+      
+      // Logika logging dipindahkan ke dalam GestureNavigationController.
+      // Tidak perlu log duplikat di sini.
       return;
     }
 
+    debugPrint('❌ [GestureDetection] gestureNavigationController is NULL!');
+
+    // Fallback ke action controller lama jika navigation controller tidak ada
     if (actionController != null) {
       if (!_cooldown.canTrigger()) {
         debugPrint('⏳ Gesture fallback cooldown active');

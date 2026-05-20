@@ -103,7 +103,22 @@ class GestureNavigationGuard {
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xFF16A34A),
         duration: const Duration(milliseconds: 1500),
-        content: Text(message),
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded,
+                color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -114,8 +129,22 @@ class GestureNavigationGuard {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         backgroundColor: Colors.red,
-        duration: const Duration(milliseconds: 1500),
-        content: Text(message),
+        duration: const Duration(milliseconds: 2000),
+        content: Row(
+          children: [
+            const Icon(Icons.error_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -196,24 +225,32 @@ class GestureNavigationGuard {
   }
 }
 
-/// Mixin opsional untuk page yang mau support gesture navigation.
 mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
-  late final GestureNavigationController gestureController;
+  @protected
+  final GestureNavigationController gestureNavigationController =
+      GestureNavigationController();
 
-  void setupGestureNavigation({String screenContext = 'unknown'}) {
-    gestureController = GestureNavigationController();
-    gestureController.setScreenContext(screenContext);
+  @protected
+  void setupGestureNavigation() {
+    gestureNavigationController.onActionResult(
+      (result) {
+        if (mounted) {
+          GestureNavigationGuard.showActionFeedback(context, result);
+        }
+      },
+    );
   }
 
+  @protected
   void registerGestureActions({
     GestureConfirmCallback? onConfirm,
     GestureNextCallback? onNext,
     GestureBackCallback? onBack,
     ScrollController? scrollController,
-    String? screenContext,
+    required String screenContext,
   }) {
     GestureNavigationGuard.registerPageGestures(
-      controller: gestureController,
+      controller: gestureNavigationController,
       owner: this,
       onConfirm: onConfirm,
       onNext: onNext,
@@ -223,15 +260,22 @@ mixin GestureNavigationMixin<T extends StatefulWidget> on State<T> {
     );
   }
 
+  @protected
   void cleanupGestureNavigation() {
     GestureNavigationGuard.unregisterPageGestures(
-      gestureController,
+      gestureNavigationController,
       owner: this,
     );
   }
 
-  void showGestureActionFeedback(GestureActionResult result) {
-    if (!mounted) return;
-    GestureNavigationGuard.showActionFeedback(context, result);
+  @protected
+  void showGestureActionFeedback(String message, {bool isError = false}) {
+    if (mounted) {
+      if (isError) {
+        GestureNavigationGuard.showErrorFeedback(context, message);
+      } else {
+        GestureNavigationGuard.showSuccessFeedback(context, message);
+      }
+    }
   }
 }
