@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../apply_job/apply_job_page.dart';
 import '../profile/profile_controller.dart';
+import '../profile/accessibility_settings_view.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/providers/camera_provider.dart';
 import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class JobDetailPage extends StatefulWidget {
@@ -36,12 +39,15 @@ class _JobDetailPageState extends State<JobDetailPage> {
     final userId = widget.currentUser['_id']?.toString() ??
         widget.currentUser['id']?.toString() ??
         widget.currentUser['user_id']?.toString() ??
+        widget.currentUser['email']?.toString() ??
         '';
     _gestureNavigationController.setUserId(userId);
     
     _loadUserDetails();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _setupJobDetailGestureCameraIfNeeded();
+      if (!mounted) return;
       _registerGestureActions();
     });
   }
@@ -54,6 +60,39 @@ class _JobDetailPageState extends State<JobDetailPage> {
     );
     _detailScrollController.dispose();
     super.dispose();
+  }
+
+  bool _isGestureNavigationModeOn() {
+    return AccessibilityController.gestureNavigationModeNotifier.value;
+  }
+
+  Future<void> _setupJobDetailGestureCameraIfNeeded() async {
+    if (!mounted) return;
+    if (!_isGestureNavigationModeOn()) return;
+
+    try {
+      final cameraProvider = context.read<CameraProvider>();
+
+      // Penting: setiap halaman harus menyambungkan ulang CameraProvider
+      // ke GestureNavigationController milik halaman yang sedang aktif.
+      cameraProvider.setGestureNavigationController(_gestureNavigationController);
+
+      if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
+        await cameraProvider.initializeCamera();
+        if (!mounted) return;
+      }
+
+      // Kalau camera sudah initialized dari HomePage, image stream bisa saja
+      // sedang berhenti/paused. Nyalakan lagi supaya detection berjalan di Detail.
+      if (cameraProvider.isInitialized && !cameraProvider.isStreaming) {
+        cameraProvider.toggleStream();
+      }
+
+      if (!mounted) return;
+      _registerGestureActions();
+    } catch (e) {
+      debugPrint('[JobDetailPage] Gesture camera setup skipped: $e');
+    }
   }
 
   void _registerGestureActions() {
@@ -93,8 +132,10 @@ class _JobDetailPageState extends State<JobDetailPage> {
     await _detailScrollController.animateTo(
       nextOffset,
       duration: const Duration(milliseconds: 450),
-      curve: Curves.easeInOut,
+      curve: Curves.easeOutCubic,
     );
+
+    if (!mounted) return false;
 
     _showGestureFeedback('Scroll detail lowongan');
     return true;
@@ -139,7 +180,9 @@ class _JobDetailPageState extends State<JobDetailPage> {
 
     if (!mounted) return;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _setupJobDetailGestureCameraIfNeeded();
+      if (!mounted) return;
       _registerGestureActions();
     });
   }
@@ -558,9 +601,7 @@ class _JobDetailPageState extends State<JobDetailPage> {
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
-                            onPressed: () {
-                              _openApplyPage();
-                            },
+                            onPressed: _openApplyPage,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: theme.colorScheme.primary,
                               foregroundColor: isDark ? Colors.black : Colors.white,
@@ -589,8 +630,23 @@ class _JobDetailPageState extends State<JobDetailPage> {
               ],
             ),
           ),
-          // Floating Mini Camera Preview
-          const MiniCameraPreview(),
+          ValueListenableBuilder<bool>(
+            valueListenable: AccessibilityController.gestureNavigationModeNotifier,
+            builder: (context, isGestureModeOn, _) {
+              if (!isGestureModeOn) {
+                return const SizedBox.shrink();
+              }
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _setupJobDetailGestureCameraIfNeeded();
+              });
+
+              return const MiniCameraPreview(
+                width: 86,
+                height: 116,
+              );
+            },
+          ),
         ],
       ),
     );

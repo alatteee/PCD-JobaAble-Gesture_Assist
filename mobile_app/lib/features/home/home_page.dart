@@ -651,7 +651,16 @@ class _HomePageState extends State<HomePage> {
     );
 
     _showGesturePageFeedback('Membuka: ${_getJobTitle(jobMap)}');
-    await _openJobDetailWithGestureReRegister(jobMap);
+
+    // Jangan await Navigator.push di dalam callback gesture.
+    // Kalau di-await, GestureNavigationController akan tetap berada dalam state
+    // "executing" selama JobDetailPage terbuka. Akibatnya gesture di halaman
+    // detail tidak langsung aktif ketika detail dibuka lewat Thumbs Up.
+    Future.microtask(() {
+      if (!mounted) return;
+      _openJobDetailWithGestureReRegister(jobMap);
+    });
+
     return true;
   }
 
