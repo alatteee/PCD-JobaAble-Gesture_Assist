@@ -160,7 +160,16 @@ class _JobDetailPageState extends State<JobDetailPage> {
     if (!mounted) return false;
 
     _showGestureFeedback('Membuka halaman lamar kerja');
-    await _openApplyPage();
+
+    // Jangan await Navigator.push di callback gesture.
+    // Kalau di-await, GestureNavigationController bisa tetap dianggap busy
+    // selama ApplyJobPage terbuka, sehingga ApplyJobPage sulit mengambil alih
+    // camera preview dan gesture controller.
+    Future.microtask(() {
+      if (!mounted) return;
+      _openApplyPage();
+    });
+
     return true;
   }
 

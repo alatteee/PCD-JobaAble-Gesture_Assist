@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
@@ -6,8 +7,8 @@ import 'application_success_page.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
 import '../gesture_assist/widgets/mini_camera_preview.dart';
-import 'package:provider/provider.dart';
 import '../gesture_assist/providers/camera_provider.dart';
+import '../profile/accessibility_settings_view.dart';
 
 class ApplyJobPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -32,6 +33,7 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
       GestureNavigationController();
 
   bool _isSubmitting = false;
+  bool _isGestureSubmitRunning = false;
   int _messageLength = 0;
 
   static const int _maxMessageLength = 100;
@@ -40,10 +42,11 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
   void initState() {
     super.initState();
 
-    // Set userId untuk gesture logging
+    // Set userId untuk gesture logging.
     final userId = widget.currentUser['_id']?.toString() ??
         widget.currentUser['id']?.toString() ??
         widget.currentUser['user_id']?.toString() ??
+        widget.currentUser['email']?.toString() ??
         '';
     _gestureNavigationController.setUserId(userId);
 
@@ -53,7 +56,9 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
       });
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _setupApplyGestureCameraIfNeeded();
+      if (!mounted) return;
       _registerGestureActions();
     });
   }
@@ -67,6 +72,39 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
     _applyScrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  bool _isGestureNavigationModeOn() {
+    return AccessibilityController.gestureNavigationModeNotifier.value;
+  }
+
+  Future<void> _setupApplyGestureCameraIfNeeded() async {
+    if (!mounted) return;
+    if (!_isGestureNavigationModeOn()) return;
+
+    try {
+      final cameraProvider = context.read<CameraProvider>();
+
+      // Penting: sambungkan detection ke controller halaman Apply Job.
+      cameraProvider.setGestureNavigationController(_gestureNavigationController);
+
+      if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
+        await cameraProvider.initializeCamera();
+        if (!mounted) return;
+      }
+
+      // Kalau kamera sudah initialized tetapi stream berhenti saat pindah halaman,
+      // aktifkan lagi agar gesture tetap terbaca di ApplyJobPage.
+      if (cameraProvider.isInitialized && !cameraProvider.isStreaming) {
+        cameraProvider.toggleStream();
+      }
+
+      if (mounted) {
+        _registerGestureActions();
+      }
+    } catch (e) {
+      debugPrint('[ApplyJobPage] Gesture camera setup skipped: $e');
+    }
   }
 
   void _registerGestureActions() {
@@ -90,7 +128,7 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
 
     if (!_applyScrollController.hasClients) {
       _showCustomSnackBar(
-        'Form belum siap discroll',
+        'Halaman belum siap discroll',
         icon: Icons.warning_amber_rounded,
       );
       return false;
@@ -112,11 +150,11 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
     await _applyScrollController.animateTo(
       nextOffset,
       duration: const Duration(milliseconds: 450),
-      curve: Curves.easeInOut,
+      curve: Curves.easeOutCubic,
     );
 
     _showCustomSnackBar(
-      'Scroll form lamaran',
+      'Scroll halaman lamar kerja',
       icon: Icons.check_circle_rounded,
     );
     return true;
@@ -140,7 +178,7 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
   Future<bool> _handleGestureSubmit() async {
     if (!mounted) return false;
 
-    if (_isSubmitting) {
+    if (_isSubmitting || _isGestureSubmitRunning) {
       _showCustomSnackBar(
         'Lamaran sedang diproses',
         icon: Icons.hourglass_bottom,
@@ -148,7 +186,46 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
       return false;
     }
 
-    return _submitApplication();
+    final message = _messageController.text.trim();
+
+    if (_userId.isEmpty || _jobId.isEmpty) {
+      _showCustomSnackBar(
+        'Data pengguna atau lowongan tidak valid',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    if (_fullName.trim().isEmpty ||
+        _email.trim().isEmpty ||
+        _phone.trim().isEmpty) {
+      _showCustomSnackBar(
+        'Data diri belum lengkap',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    if (message.length > _maxMessageLength) {
+      _showCustomSnackBar(
+        'Pesan maksimal 100 karakter',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    _isGestureSubmitRunning = true;
+
+    try {
+      _showCustomSnackBar(
+        'Mengirim lamaran',
+        icon: Icons.check_circle_rounded,
+      );
+
+      return await _submitApplication();
+    } finally {
+      _isGestureSubmitRunning = false;
+    }
   }
 
   String get _jobId => MongoService.getMongoId(widget.job['_id']);
@@ -482,8 +559,25 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
               ],
             ),
           ),
-          // Floating Mini Camera Preview
-          const MiniCameraPreview(),
+          // Floating Mini Camera Preview untuk Gesture Navigation Mode.
+          ValueListenableBuilder<bool>(
+            valueListenable:
+                AccessibilityController.gestureNavigationModeNotifier,
+            builder: (context, isGestureModeOn, _) {
+              if (!isGestureModeOn) {
+                return const SizedBox.shrink();
+              }
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _setupApplyGestureCameraIfNeeded();
+              });
+
+              return const MiniCameraPreview(
+                width: 86,
+                height: 116,
+              );
+            },
+          ),
         ],
       ),
     );
