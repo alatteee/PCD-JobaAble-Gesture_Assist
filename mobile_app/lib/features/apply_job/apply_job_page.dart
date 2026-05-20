@@ -6,6 +6,8 @@ import 'application_success_page.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
 import '../gesture_assist/widgets/mini_camera_preview.dart';
+import 'package:provider/provider.dart';
+import '../gesture_assist/providers/camera_provider.dart';
 
 class ApplyJobPage extends StatefulWidget {
   final Map<String, dynamic> job;

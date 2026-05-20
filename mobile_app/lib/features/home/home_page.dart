@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
@@ -12,8 +13,8 @@ import '../profile/profile_controller.dart';
 import '../notifications/notification_page.dart';
 import '../cv/cv_view.dart';
 import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/providers/camera_provider.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
-import '../gesture_assist/widgets/gesture_status_indicator.dart';
 import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class HomePage extends StatefulWidget {
@@ -50,6 +51,7 @@ class _HomePageState extends State<HomePage> {
 
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _homeScrollController = ScrollController();
+  final List<GlobalKey> _jobItemKeys = [];
   final GestureNavigationController _gestureNavigationController =
       GestureNavigationController();
 
@@ -75,6 +77,7 @@ class _HomePageState extends State<HomePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
     });
   }
 
@@ -339,6 +342,7 @@ class _HomePageState extends State<HomePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
     });
   }
 
@@ -465,6 +469,7 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_selectedIndex == 0) {
         _registerHomeGestureActionsIfNeeded();
+        _setupHomeGestureCameraIfNeeded();
       } else {
         GestureNavigationGuard.unregisterPageGestures(
           _gestureNavigationController,
@@ -472,6 +477,106 @@ class _HomePageState extends State<HomePage> {
         );
       }
     });
+  }
+
+  bool _isGestureNavigationModeOn() {
+    return AccessibilityController.gestureNavigationModeNotifier.value;
+  }
+
+  Future<void> _setupHomeGestureCameraIfNeeded() async {
+    if (!mounted || _selectedIndex != 0) return;
+    if (!_isGestureNavigationModeOn()) return;
+
+    try {
+      final cameraProvider = context.read<CameraProvider>();
+      cameraProvider.setGestureNavigationController(_gestureNavigationController);
+
+      if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
+        await cameraProvider.initializeCamera();
+        if (!mounted) return;
+      }
+    } catch (e) {
+      debugPrint('[HomePage] Gesture camera setup skipped: $e');
+    }
+  }
+
+  void _syncJobItemKeys() {
+    if (_jobItemKeys.length < filteredJobs.length) {
+      _jobItemKeys.addAll(
+        List.generate(
+          filteredJobs.length - _jobItemKeys.length,
+          (_) => GlobalKey(),
+        ),
+      );
+    } else if (_jobItemKeys.length > filteredJobs.length) {
+      _jobItemKeys.removeRange(filteredJobs.length, _jobItemKeys.length);
+    }
+  }
+
+  String _getJobTitle(Map<String, dynamic> job) {
+    final title = job['title']?.toString().trim();
+    if (title != null && title.isNotEmpty) return title;
+
+    final jobTitle = job['job_title']?.toString().trim();
+    if (jobTitle != null && jobTitle.isNotEmpty) return jobTitle;
+
+    return 'Lowongan';
+  }
+
+  String _selectedJobMessage(Map<String, dynamic> job) {
+    final title = _getJobTitle(job);
+
+    if (title.length <= 34) {
+      return 'Dipilih: $title';
+    }
+
+    return 'Dipilih: ${title.substring(0, 31)}...';
+  }
+
+  Future<void> _scrollToFocusedJob() async {
+    if (!mounted) return;
+
+    if (filteredJobs.isEmpty ||
+        _currentFocusedJobIndex < 0 ||
+        _currentFocusedJobIndex >= filteredJobs.length) {
+      return;
+    }
+
+    _syncJobItemKeys();
+
+    final itemContext = _currentFocusedJobIndex < _jobItemKeys.length
+        ? _jobItemKeys[_currentFocusedJobIndex].currentContext
+        : null;
+
+    if (itemContext != null) {
+      await Scrollable.ensureVisible(
+        itemContext,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.42,
+      );
+      return;
+    }
+
+    if (!_homeScrollController.hasClients) return;
+
+    const headerOffset = 520.0;
+    const estimatedItemHeight = 190.0;
+    final viewportHeight = _homeScrollController.position.viewportDimension;
+    final itemOffset = headerOffset + (_currentFocusedJobIndex * estimatedItemHeight);
+    final centeredOffset =
+        itemOffset - (viewportHeight / 2) + (estimatedItemHeight / 2);
+
+    final safeOffset = centeredOffset.clamp(
+      0.0,
+      _homeScrollController.position.maxScrollExtent,
+    );
+
+    await _homeScrollController.animateTo(
+      safeOffset,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _registerHomeGestureActionsIfNeeded() {
@@ -513,22 +618,18 @@ class _HomePageState extends State<HomePage> {
       _currentFocusedJobIndex++;
     });
 
-    if (_homeScrollController.hasClients) {
-      final targetOffset = (520.0 + (_currentFocusedJobIndex * 170.0)).clamp(
-        0.0,
-        _homeScrollController.position.maxScrollExtent,
-      );
+    await _scrollToFocusedJob();
 
-      await _homeScrollController.animateTo(
-        targetOffset,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeInOut,
-      );
-    }
+    if (!mounted) return false;
+
+    final focusedJob = Map<String, dynamic>.from(
+      filteredJobs[_currentFocusedJobIndex] as Map,
+    );
 
     _showGesturePageFeedback(
-      'Lowongan ${_currentFocusedJobIndex + 1} dipilih',
+      _selectedJobMessage(focusedJob),
     );
+
     return true;
   }
 
@@ -549,7 +650,7 @@ class _HomePageState extends State<HomePage> {
       filteredJobs[_currentFocusedJobIndex] as Map,
     );
 
-    _showGesturePageFeedback('Membuka detail lowongan');
+    _showGesturePageFeedback('Membuka: ${_getJobTitle(jobMap)}');
     await _openJobDetailWithGestureReRegister(jobMap);
     return true;
   }
@@ -569,7 +670,7 @@ class _HomePageState extends State<HomePage> {
 
     if (!popped && mounted) {
       _showGesturePageFeedback(
-        'Tidak ada halaman sebelumnya untuk kembali',
+        'Sudah di halaman utama',
         isError: true,
       );
     }
@@ -594,6 +695,7 @@ class _HomePageState extends State<HomePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
     });
   }
 
@@ -662,14 +764,24 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-          // Mini Camera Preview (Shows on all tabs of HomePage)
-          const MiniCameraPreview(),
-          
-          // Gesture detection status indicator
           if (_selectedIndex == 0)
-            const GestureStatusIndicator(
-              gestureStatus: 'Ready',
-              isDetecting: false,
+            ValueListenableBuilder<bool>(
+              valueListenable:
+                  AccessibilityController.gestureNavigationModeNotifier,
+              builder: (context, isGestureModeOn, _) {
+                if (!isGestureModeOn) {
+                  return const SizedBox.shrink();
+                }
+
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _setupHomeGestureCameraIfNeeded();
+                });
+
+                return const MiniCameraPreview(
+                  width: 86,
+                  height: 116,
+                );
+              },
             ),
         ],
       ),
@@ -848,6 +960,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildBeranda(BuildContext context) {
     final theme = Theme.of(context);
+    _syncJobItemKeys();
 
     return RefreshIndicator(
       color: theme.colorScheme.primary,
@@ -1081,7 +1194,10 @@ class _HomePageState extends State<HomePage> {
                         AccessibilityController.highContrastNotifier,
                     builder: (context, isHighContrast, _) {
                       return AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
+                        key: index < _jobItemKeys.length
+                            ? _jobItemKeys[index]
+                            : null,
+                        duration: const Duration(milliseconds: 220),
                         margin: EdgeInsets.only(bottom: isFocused ? 10 : 0),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(18),
@@ -1093,18 +1209,59 @@ class _HomePageState extends State<HomePage> {
                                   width: 2,
                                 )
                               : null,
+                          boxShadow: isFocused && !isHighContrast
+                              ? [
+                                  BoxShadow(
+                                    color: AppColors.primaryNavy.withOpacity(0.12),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ]
+                              : null,
                         ),
-                        child: _JobCard(
-                          job: jobMap,
-                          isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
-                          isHighContrast: isHighContrast,
-                          onDetail: () {
-                            setState(() {
-                              _currentFocusedJobIndex = index;
-                            });
-                            _openJobDetailWithGestureReRegister(jobMap);
-                          },
-                          onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            _JobCard(
+                              job: jobMap,
+                              isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
+                              isHighContrast: isHighContrast,
+                              onDetail: () {
+                                setState(() {
+                                  _currentFocusedJobIndex = index;
+                                });
+                                _openJobDetailWithGestureReRegister(jobMap);
+                              },
+                              onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                            ),
+                            if (isFocused)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isHighContrast
+                                        ? AccessibilityTheme.yellow
+                                        : AppColors.primaryNavy,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    'Dipilih',
+                                    style: TextStyle(
+                                      color: isHighContrast
+                                          ? AccessibilityTheme.black
+                                          : Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       );
                     },
