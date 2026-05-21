@@ -36,6 +36,11 @@ class GestureNavigationController extends ChangeNotifier {
   bool _isEnabled = true;
   bool _isExecuting = false;
 
+  /// Cache lokal untuk status Gesture Navigation Mode.
+  /// Ini disinkronkan langsung dari AccessibilityController agar tidak hanya
+  /// bergantung pada pembacaan Hive setiap kali action berjalan.
+  bool? _gestureModeCache;
+
   int _cooldownMs = 1500;
   double _confidenceThreshold = 0.65;
   String _screenContext = 'unknown';
@@ -66,6 +71,19 @@ class GestureNavigationController extends ChangeNotifier {
 
   void setEnabled(bool enabled) {
     _isEnabled = enabled;
+    notifyListeners();
+  }
+
+  /// Sinkronisasi langsung dari Accessibility Settings.
+  ///
+  /// Dipakai agar toggle Gesture Navigation Mode yang terlihat ON di UI
+  /// langsung terbaca ON oleh controller gesture.
+  void syncGestureNavigationMode(bool enabled) {
+    _gestureModeCache = enabled;
+    _isEnabled = enabled;
+
+    debugPrint('[GestureNavigation] Gesture mode synced: $enabled');
+
     notifyListeners();
   }
 
@@ -131,6 +149,13 @@ class GestureNavigationController extends ChangeNotifier {
   }
 
   Future<bool> _isGestureNavigationModeEnabled() async {
+    if (_gestureModeCache != null) {
+      debugPrint(
+        '[GestureNavigation] Gesture mode read from cache: $_gestureModeCache',
+      );
+      return _gestureModeCache == true;
+    }
+
     try {
       final Box<dynamic> box;
 
@@ -140,7 +165,18 @@ class GestureNavigationController extends ChangeNotifier {
         box = await Hive.openBox<dynamic>(_settingsBoxName);
       }
 
-      return box.get(_gestureNavigationModeKey, defaultValue: false) == true;
+      final savedValue = box.get(
+        _gestureNavigationModeKey,
+        defaultValue: false,
+      );
+
+      _gestureModeCache = savedValue == true;
+
+      debugPrint(
+        '[GestureNavigation] Gesture mode read from Hive: $savedValue',
+      );
+
+      return savedValue == true;
     } catch (e) {
       debugPrint('[GestureNavigation] Failed to read gesture mode: $e');
       return false;
@@ -164,6 +200,25 @@ class GestureNavigationController extends ChangeNotifier {
 
     final remaining = _cooldownMs - elapsedMs;
     return remaining <= 0 ? 0 : remaining;
+  }
+
+  /// Dipakai oleh GestureDetectionService untuk menampilkan feedback cooldown
+  /// tanpa menjalankan action baru.
+  bool notifyCooldownIfActive(GestureActionType type) {
+    if (!_isCooldownActive()) {
+      return false;
+    }
+
+    _finishAction(
+      GestureActionResult(
+        type: type,
+        status: ActionStatus.notReady,
+        message: 'Gesture cooldown... (${_remainingCooldownMs()}ms)',
+      ),
+      shouldNotify: true,
+    );
+
+    return true;
   }
 
   Future<GestureActionResult> handleGestureAction({
@@ -291,9 +346,10 @@ class GestureNavigationController extends ChangeNotifier {
   }
 
   Future<void> _saveLog(GestureActionType type, double confidence) async {
-    // Generate unique ID menggunakan timestamp + random suffix
-    final uniqueId = '${DateTime.now().millisecondsSinceEpoch}_${_screenContext}_${type.name}';
-    
+    // Generate unique ID menggunakan timestamp + screen context + type
+    final uniqueId =
+        '${DateTime.now().millisecondsSinceEpoch}_${_screenContext}_${type.name}';
+
     final log = GestureLogModel(
       id: uniqueId,
       userId: _userId.isNotEmpty ? _userId : 'unknown',
@@ -304,6 +360,7 @@ class GestureNavigationController extends ChangeNotifier {
       timestamp: DateTime.now(),
       syncStatus: 'pending',
     );
+
     await _logService.saveGestureLog(log);
   }
 
@@ -340,6 +397,7 @@ class GestureNavigationController extends ChangeNotifier {
   void printStatus() {
     debugPrint('[GestureNavigation] === Status ===');
     debugPrint('[GestureNavigation] Enabled: $_isEnabled');
+    debugPrint('[GestureNavigation] Gesture Mode Cache: $_gestureModeCache');
     debugPrint('[GestureNavigation] Executing: $_isExecuting');
     debugPrint('[GestureNavigation] Cooldown: $_cooldownMs ms');
     debugPrint('[GestureNavigation] Confidence: $_confidenceThreshold');

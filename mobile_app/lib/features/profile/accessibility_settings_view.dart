@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/views/gesture_guide_page.dart';
 
 enum AccessibilityTextSize {
@@ -114,6 +115,16 @@ class AccessibilityController {
     );
 
     gestureNavigationModeNotifier.value = savedGestureMode == true;
+
+    GestureNavigationController().syncGestureNavigationMode(
+      gestureNavigationModeNotifier.value,
+    );
+
+    debugPrint(
+      '[Accessibility] Gesture Navigation Mode init: '
+      '${gestureNavigationModeNotifier.value} | Hive=$savedGestureMode',
+    );
+
     _isInitialized = true;
   }
 
@@ -185,6 +196,13 @@ class AccessibilityController {
 
     final box = await _openSettingsBox();
     await box.put(_gestureNavigationModeKey, value);
+
+    GestureNavigationController().syncGestureNavigationMode(value);
+
+    debugPrint(
+      '[Accessibility] Gesture Navigation Mode saved: '
+      '$value | Hive=${box.get(_gestureNavigationModeKey)}',
+    );
   }
 }
 
@@ -452,6 +470,7 @@ class _GestureNavigationModeToggle extends StatelessWidget {
 
                   if (!context.mounted) return;
 
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(

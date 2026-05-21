@@ -44,6 +44,9 @@ class GestureDetectionService {
   String? _lastLoggedGestureType;
   DateTime? _lastLoggedAt;
 
+  DateTime? _lastCooldownFeedbackAt;
+  static const int _cooldownFeedbackThrottleMs = 700;
+
   static const int _sameGestureRelogDelayMs = 5000;
 
   String get debugGestureType => _debugGestureType;
@@ -100,6 +103,11 @@ class GestureDetectionService {
             final stableOutput = _stabilityHelper.process(rawResult);
             final resultForUi = stableOutput.result;
 
+            // Cek feedback cooldown sebelum action handler.
+            // Ini tidak menjalankan action baru, hanya mengirim feedback
+            // kalau controller memang sedang cooldown.
+            _notifyCooldownFeedbackIfNeeded(stableOutput);
+
             await _handleStableActionIfNeeded(stableOutput);
 
             return resultForUi;
@@ -129,6 +137,11 @@ class GestureDetectionService {
       final stableOutput = _stabilityHelper.process(rawResult);
       final resultForUi = stableOutput.result;
 
+      // Cek feedback cooldown sebelum action handler.
+      // Ini tidak menjalankan action baru, hanya mengirim feedback
+      // kalau controller memang sedang cooldown.
+      _notifyCooldownFeedbackIfNeeded(stableOutput);
+
       await _handleStableActionIfNeeded(stableOutput);
 
       return resultForUi;
@@ -137,6 +150,42 @@ class GestureDetectionService {
       return null;
     } finally {
       _isProcessing = false;
+    }
+  }
+
+  void _notifyCooldownFeedbackIfNeeded(
+    GestureStabilityOutput stableOutput,
+  ) {
+    if (gestureNavigationController == null) {
+      return;
+    }
+
+    final result = stableOutput.result;
+    final actionType = _gestureTypeToActionType(result.gestureType);
+
+    if (actionType == GestureActionType.unknown) {
+      return;
+    }
+
+    final now = DateTime.now();
+
+    if (_lastCooldownFeedbackAt != null) {
+      final elapsedMs =
+          now.difference(_lastCooldownFeedbackAt!).inMilliseconds;
+
+      if (elapsedMs < _cooldownFeedbackThrottleMs) {
+        return;
+      }
+    }
+
+    final didNotify =
+        gestureNavigationController!.notifyCooldownIfActive(actionType);
+
+    if (didNotify) {
+      _lastCooldownFeedbackAt = now;
+      debugPrint(
+        '⏳ [GestureDetection] Cooldown feedback shown for ${result.gestureType}',
+      );
     }
   }
 
@@ -157,20 +206,27 @@ class GestureDetectionService {
     );
 
     if (gestureNavigationController != null) {
-      debugPrint('📤 [GestureDetection] Calling handleGestureAction via NavigationController');
-      
-      final actionType = _gestureTypeToActionType(result.gestureType);
-      debugPrint('📊 [GestureDetection] ActionType: $actionType, Confidence: ${result.confidence}');
+      debugPrint(
+        '📤 [GestureDetection] Calling handleGestureAction via NavigationController',
+      );
 
-      final actionResult = await gestureNavigationController!.handleGestureAction(
+      final actionType = _gestureTypeToActionType(result.gestureType);
+      debugPrint(
+        '📊 [GestureDetection] ActionType: $actionType, Confidence: ${result.confidence}',
+      );
+
+      final actionResult =
+          await gestureNavigationController!.handleGestureAction(
         type: actionType,
         confidence: result.confidence,
         isStable: stableOutput.isStable,
         context: null,
       );
 
-      debugPrint('✅ [GestureDetection] Action executed: ${actionResult.message}');
-      
+      debugPrint(
+        '✅ [GestureDetection] Action executed: ${actionResult.message}',
+      );
+
       // Logika logging dipindahkan ke dalam GestureNavigationController.
       // Tidak perlu log duplikat di sini.
       return;
@@ -178,7 +234,7 @@ class GestureDetectionService {
 
     debugPrint('❌ [GestureDetection] gestureNavigationController is NULL!');
 
-    // Fallback ke action controller lama jika navigation controller tidak ada
+    // Fallback ke action controller lama jika navigation controller tidak ada.
     if (actionController != null) {
       if (!_cooldown.canTrigger()) {
         debugPrint('⏳ Gesture fallback cooldown active');

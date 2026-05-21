@@ -66,6 +66,11 @@ class _HomePageState extends State<HomePage> {
     // Set userId untuk gesture logging
     _gestureNavigationController.setUserId(_currentUserId);
 
+    // Listener feedback global dari GestureNavigationController.
+    // Ini penting supaya feedback seperti cooldown/nonaktif/confidence rendah
+    // bisa muncul di HomePage, bukan hanya muncul di terminal.
+    _setupHomeGestureFeedbackListener();
+
     if (widget.showSuccessDialog) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showSuccessBottomSheet();
@@ -206,7 +211,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> toggleSaveJob(Map<String, dynamic> job, bool isHighContrast) async {
+  Future<void> toggleSaveJob(
+    Map<String, dynamic> job,
+    bool isHighContrast,
+  ) async {
     final jobId = _jobIdOf(job);
 
     if (_currentUserId.isEmpty || jobId.isEmpty) {
@@ -272,20 +280,25 @@ class _HomePageState extends State<HomePage> {
     final snackBar = SnackBar(
       content: Row(
         children: [
-          Icon(icon, color: isHighContrast ? AccessibilityTheme.black : Colors.white),
+          Icon(
+            icon,
+            color: isHighContrast ? AccessibilityTheme.black : Colors.white,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               message,
               style: TextStyle(
-                color: isHighContrast ? AccessibilityTheme.black : Colors.white,
+                color:
+                    isHighContrast ? AccessibilityTheme.black : Colors.white,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
         ],
       ),
-      backgroundColor: isHighContrast ? AccessibilityTheme.yellow : backgroundColor,
+      backgroundColor:
+          isHighContrast ? AccessibilityTheme.yellow : backgroundColor,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -350,7 +363,7 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent, // Make it transparent
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(40),
@@ -361,10 +374,14 @@ class _HomePageState extends State<HomePage> {
         return ValueListenableBuilder<bool>(
           valueListenable: AccessibilityController.highContrastNotifier,
           builder: (context, isHighContrast, _) {
-            final bgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
-            final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-            final buttonBgColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-            final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+            final bgColor =
+                isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+            final textColor =
+                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonBgColor =
+                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonTextColor =
+                isHighContrast ? AccessibilityTheme.black : Colors.white;
 
             return Container(
               height: 440,
@@ -396,7 +413,9 @@ class _HomePageState extends State<HomePage> {
                         child: Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isHighContrast ? Colors.green.withOpacity(0.2) : Colors.green.withOpacity(0.1),
+                            color: isHighContrast
+                                ? Colors.green.withOpacity(0.2)
+                                : Colors.green.withOpacity(0.1),
                           ),
                           padding: const EdgeInsets.all(20),
                           child: const Icon(
@@ -563,7 +582,8 @@ class _HomePageState extends State<HomePage> {
     const headerOffset = 520.0;
     const estimatedItemHeight = 190.0;
     final viewportHeight = _homeScrollController.position.viewportDimension;
-    final itemOffset = headerOffset + (_currentFocusedJobIndex * estimatedItemHeight);
+    final itemOffset =
+        headerOffset + (_currentFocusedJobIndex * estimatedItemHeight);
     final centeredOffset =
         itemOffset - (viewportHeight / 2) + (estimatedItemHeight / 2);
 
@@ -579,8 +599,53 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _setupHomeGestureFeedbackListener() {
+    _gestureNavigationController.onActionResult((result) {
+      if (!mounted || _selectedIndex != 0) return;
+
+      final message = result.message?.trim();
+
+      if (message == null || message.isEmpty) return;
+
+      final lowerMessage = message.toLowerCase();
+
+      final isControllerFeedback = lowerMessage.contains('cooldown') ||
+          lowerMessage.contains('nonaktif') ||
+          lowerMessage.contains('confidence') ||
+          lowerMessage.contains('belum stabil') ||
+          lowerMessage.contains('diproses') ||
+          lowerMessage.contains('tidak dikenali');
+
+      // Feedback sukses seperti "Lanjut berhasil" sudah ditangani langsung
+      // oleh _handleGestureNextJob(), jadi jangan ditampilkan ulang di sini.
+      if (!isControllerFeedback) return;
+
+      final isHighContrast =
+          AccessibilityController.highContrastNotifier.value;
+
+      final bool isWarning = lowerMessage.contains('cooldown') ||
+          lowerMessage.contains('nonaktif') ||
+          lowerMessage.contains('confidence') ||
+          lowerMessage.contains('belum stabil') ||
+          lowerMessage.contains('diproses');
+
+      _showCustomSnackBar(
+        message: message,
+        icon: isWarning
+            ? Icons.hourglass_bottom_rounded
+            : Icons.warning_amber_rounded,
+        backgroundColor: isWarning ? Colors.orange : Colors.red,
+        isHighContrast: isHighContrast,
+      );
+    });
+  }
+
   void _registerHomeGestureActionsIfNeeded() {
     if (!mounted || _selectedIndex != 0) return;
+
+    // Re-register listener karena controller singleton dan callback
+    // onActionResult bisa ditimpa oleh halaman lain.
+    _setupHomeGestureFeedbackListener();
 
     GestureNavigationGuard.registerPageGestures(
       controller: _gestureNavigationController,
@@ -815,9 +880,8 @@ class _HomePageState extends State<HomePage> {
                 : AppColors.primaryNavy,
             elevation: 0,
             type: BottomNavigationBarType.fixed,
-            selectedItemColor: theme.brightness == Brightness.dark
-                ? Colors.black
-                : Colors.white,
+            selectedItemColor:
+                theme.brightness == Brightness.dark ? Colors.black : Colors.white,
             unselectedItemColor: theme.brightness == Brightness.dark
                 ? Colors.black.withOpacity(0.6)
                 : Colors.white70,
@@ -1221,7 +1285,8 @@ class _HomePageState extends State<HomePage> {
                           boxShadow: isFocused && !isHighContrast
                               ? [
                                   BoxShadow(
-                                    color: AppColors.primaryNavy.withOpacity(0.12),
+                                    color:
+                                        AppColors.primaryNavy.withOpacity(0.12),
                                     blurRadius: 14,
                                     offset: const Offset(0, 6),
                                   ),
@@ -1241,7 +1306,8 @@ class _HomePageState extends State<HomePage> {
                                 });
                                 _openJobDetailWithGestureReRegister(jobMap);
                               },
-                              onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                              onSave: () =>
+                                  toggleSaveJob(jobMap, isHighContrast),
                             ),
                             if (isFocused)
                               Positioned(
@@ -1439,7 +1505,9 @@ class _JobCard extends StatelessWidget {
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighContrast ? outlineButtonColor.withOpacity(0.5) : Colors.grey.withOpacity(0.1),
+          color: isHighContrast
+              ? outlineButtonColor.withOpacity(0.5)
+              : Colors.grey.withOpacity(0.1),
         ),
         boxShadow: [
           if (!isHighContrast)

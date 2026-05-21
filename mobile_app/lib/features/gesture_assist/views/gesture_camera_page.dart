@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../providers/camera_provider.dart';
@@ -28,15 +29,26 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
     _navigationController.onActionResult((result) {
       if (!mounted) return;
 
-      // Show SnackBar feedback
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (result.isSuccess) {
+        HapticFeedback.lightImpact();
+      } else {
+        HapticFeedback.selectionClick();
+      }
+
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
             result.message ?? 'Action',
             style: const TextStyle(color: Colors.white),
           ),
-          backgroundColor: result.isSuccess ? Colors.green : Colors.red,
+          backgroundColor: result.isSuccess
+              ? Colors.green
+              : _feedbackColor(result.message),
           duration: const Duration(milliseconds: 1500),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     });
@@ -49,13 +61,27 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<CameraProvider>();
       provider.initializeCamera();
-      
+
       // Wire BOTH controllers to provider
       // GestureNavigationController will be used (newer, dengan cooldown notif)
       // GestureActionController sebagai fallback
       provider.setActionController(_actionController);
       provider.setGestureNavigationController(_navigationController);
     });
+  }
+
+  Color _feedbackColor(String? message) {
+    final text = (message ?? '').toLowerCase();
+
+    if (text.contains('cooldown') ||
+        text.contains('belum stabil') ||
+        text.contains('confidence') ||
+        text.contains('nonaktif') ||
+        text.contains('diproses')) {
+      return Colors.orange;
+    }
+
+    return Colors.red;
   }
 
   @override
@@ -195,8 +221,8 @@ class _GestureStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-  final String gesture = provider.detectedGesture ?? 'none';
-  final action = _mapActionLabel(gesture);
+    final String gesture = provider.detectedGesture ?? 'none';
+    final action = _mapActionLabel(gesture);
 
     return Container(
       padding: const EdgeInsets.symmetric(
