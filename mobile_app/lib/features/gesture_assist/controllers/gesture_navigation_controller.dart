@@ -5,6 +5,7 @@ import '../models/gesture_action_model.dart';
 import '../models/gesture_log_model.dart';
 import '../services/gesture_action_service.dart';
 import '../services/gesture_log_local_service.dart';
+import '../services/gesture_log_sync_service.dart';
 
 /// Controller utama untuk Gesture Navigation.
 ///
@@ -44,7 +45,7 @@ class GestureNavigationController extends ChangeNotifier {
   int _cooldownMs = 1500;
   double _confidenceThreshold = 0.65;
   String _screenContext = 'unknown';
-  String _userId = ''; // Untuk logging
+  String _userId = '';
 
   Function(GestureActionResult)? _onActionResult;
 
@@ -318,6 +319,7 @@ class GestureNavigationController extends ChangeNotifier {
     notifyListeners();
 
     GestureActionResult result;
+
     switch (type) {
       case GestureActionType.confirm:
         result = await _actionService.executeConfirm();
@@ -346,22 +348,39 @@ class GestureNavigationController extends ChangeNotifier {
   }
 
   Future<void> _saveLog(GestureActionType type, double confidence) async {
-    // Generate unique ID menggunakan timestamp + screen context + type
+    final now = DateTime.now();
+
+    final currentScreenContext = _screenContext.isNotEmpty
+        ? _screenContext
+        : _actionService.activeScreenContext;
+
     final uniqueId =
-        '${DateTime.now().millisecondsSinceEpoch}_${_screenContext}_${type.name}';
+        '${now.microsecondsSinceEpoch}_${currentScreenContext}_${type.name}';
 
     final log = GestureLogModel(
       id: uniqueId,
-      userId: _userId.isNotEmpty ? _userId : 'unknown',
+      userId: _userId.trim().isNotEmpty ? _userId.trim() : 'unknown',
       gestureType: _actionTypeToGestureType(type),
       action: type.name,
       confidence: confidence,
-      screenContext: _screenContext,
-      timestamp: DateTime.now(),
+      screenContext:
+          currentScreenContext.isNotEmpty ? currentScreenContext : 'unknown',
+      timestamp: now,
       syncStatus: 'pending',
     );
 
-    await _logService.saveGestureLog(log);
+    try {
+      await _logService.saveGestureLog(log);
+
+      debugPrint(
+        '[GestureNavigation] Log saved locally: '
+        '${log.gestureType} | ${log.action} | ${log.screenContext} | ${log.confidence}',
+      );
+
+      GestureLogSyncService().syncPendingGestureLogs();
+    } catch (e) {
+      debugPrint('[GestureNavigation] Failed to save gesture log: $e');
+    }
   }
 
   String _actionTypeToGestureType(GestureActionType type) {
@@ -372,7 +391,7 @@ class GestureNavigationController extends ChangeNotifier {
         return 'open_palm';
       case GestureActionType.back:
         return 'fist';
-      default:
+      case GestureActionType.unknown:
         return 'unknown';
     }
   }
@@ -383,9 +402,11 @@ class GestureNavigationController extends ChangeNotifier {
   }) {
     _isExecuting = false;
     _setActionResult(result);
+
     if (shouldNotify) {
       notifyListeners();
     }
+
     return result;
   }
 

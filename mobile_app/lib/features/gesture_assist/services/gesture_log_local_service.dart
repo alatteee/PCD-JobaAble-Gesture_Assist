@@ -26,10 +26,11 @@ class GestureLogLocalService {
   Future<void> updateSyncStatus(String logId, String status) async {
     final box = await _openBox();
     final log = box.get(logId);
-    if (log != null) {
-      log.copyWith(syncStatus: status);
-      await box.put(logId, log);
-    }
+
+    if (log == null) return;
+
+    final updatedLog = log.copyWith(syncStatus: status);
+    await box.put(logId, updatedLog);
   }
 
   Future<void> deleteGestureLog(String logId) async {

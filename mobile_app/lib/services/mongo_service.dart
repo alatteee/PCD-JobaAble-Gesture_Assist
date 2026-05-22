@@ -445,16 +445,56 @@ class MongoService {
 
   static Future<bool> syncGestureData(List<Map<String, dynamic>> dataList) async {
     try {
-      await ensureConnected();
+      if (dataList.isEmpty) return true;
+
+      final isConnected = await ensureConnected();
+      if (!isConnected) {
+        print('⚠️ syncGestureData: MongoDB not connected.');
+        return false;
+      }
+
       final isLive = await verifyConnected();
       if (!isLive) {
         print('⚠️ syncGestureData: DB not live.');
         return false;
       }
 
-      await gestureLogs.insertAll(dataList);
-      print('✅ Successfully synced ${dataList.length} gesture logs to MongoDB');
-      return true;
+      int successCount = 0;
+
+      for (final rawData in dataList) {
+        final data = Map<String, dynamic>.from(rawData);
+        final id = data['_id']?.toString() ?? '';
+
+        if (id.isEmpty) {
+          print('⚠️ syncGestureData skipped: _id kosong.');
+          continue;
+        }
+
+        data['syncStatus'] = 'synced';
+
+        final existing = await gestureLogs.findOne(
+          where.eq('_id', id),
+        );
+
+        if (existing == null) {
+          await gestureLogs.insertOne(data);
+        } else {
+          await gestureLogs.updateOne(
+            where.eq('_id', id),
+            {
+              r'$set': data,
+            },
+          );
+        }
+
+        successCount++;
+      }
+
+      print(
+        '✅ Successfully synced $successCount/${dataList.length} gesture logs to MongoDB',
+      );
+
+      return successCount == dataList.length;
     } catch (e) {
       print('❌ Error syncing gesture logs: $e');
       return false;
