@@ -5,7 +5,6 @@ import '../models/gesture_action_model.dart';
 import '../models/gesture_log_model.dart';
 import '../services/gesture_action_service.dart';
 import '../services/gesture_log_local_service.dart';
-import '../services/gesture_log_sync_service.dart';
 
 /// Controller utama untuk Gesture Navigation.
 ///
@@ -366,7 +365,7 @@ class GestureNavigationController extends ChangeNotifier {
       screenContext:
           currentScreenContext.isNotEmpty ? currentScreenContext : 'unknown',
       timestamp: now,
-      syncStatus: 'pending',
+      syncStatus: 'local',
     );
 
     try {
@@ -376,8 +375,6 @@ class GestureNavigationController extends ChangeNotifier {
         '[GestureNavigation] Log saved locally: '
         '${log.gestureType} | ${log.action} | ${log.screenContext} | ${log.confidence}',
       );
-
-      GestureLogSyncService().syncPendingGestureLogs();
     } catch (e) {
       debugPrint('[GestureNavigation] Failed to save gesture log: $e');
     }

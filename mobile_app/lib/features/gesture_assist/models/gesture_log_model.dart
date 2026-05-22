@@ -25,8 +25,15 @@ class GestureLogModel extends HiveObject {
   @HiveField(6)
   final DateTime timestamp;
 
+  /// Status penyimpanan log.
+  ///
+  /// Saat ini Gesture History hanya disimpan secara lokal di Hive,
+  /// jadi nilai default-nya adalah 'local'.
+  ///
+  /// Field ini tetap dipertahankan agar kompatibel dengan Hive Adapter
+  /// yang sudah pernah dibuat.
   @HiveField(7)
-  final String syncStatus; // 'pending', 'synced', 'failed'
+  final String syncStatus;
 
   GestureLogModel({
     required this.id,
@@ -36,7 +43,7 @@ class GestureLogModel extends HiveObject {
     required this.confidence,
     required this.screenContext,
     required this.timestamp,
-    this.syncStatus = 'pending',
+    this.syncStatus = 'local',
   });
 
   Map<String, dynamic> toMap() {
@@ -63,7 +70,7 @@ class GestureLogModel extends HiveObject {
       timestamp: map['timestamp'] != null
           ? DateTime.parse(map['timestamp'])
           : DateTime.now(),
-      syncStatus: map['syncStatus'] ?? 'pending',
+      syncStatus: map['syncStatus'] ?? 'local',
     );
   }
 

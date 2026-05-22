@@ -16,7 +16,6 @@ import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/providers/camera_provider.dart';
 import '../gesture_assist/utils/gesture_navigation_guard.dart';
 import '../gesture_assist/widgets/mini_camera_preview.dart';
-import '../gesture_assist/services/gesture_log_sync_service.dart'; 
 
 class HomePage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -64,15 +63,13 @@ class _HomePageState extends State<HomePage> {
 
     _selectedIndex = widget.initialIndex.clamp(0, 3).toInt();
 
-    // Set userId untuk gesture logging
+    // Set userId untuk gesture logging lokal
     _gestureNavigationController.setUserId(_currentUserId);
 
     // Listener feedback global dari GestureNavigationController.
     // Ini penting supaya feedback seperti cooldown/nonaktif/confidence rendah
     // bisa muncul di HomePage, bukan hanya muncul di terminal.
     _setupHomeGestureFeedbackListener();
-
-    GestureLogSyncService().syncPendingGestureLogs();
 
     if (widget.showSuccessDialog) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
