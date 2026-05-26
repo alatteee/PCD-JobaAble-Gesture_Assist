@@ -43,6 +43,9 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   bool isLoadingProfileName = true;
   bool _isOpeningNotificationPage = false;
+  bool _isUpdatingGestureMode = false;
+
+  CameraProvider? _cameraProvider;
 
   String? namaLengkap;
 
@@ -87,11 +90,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _cameraProvider ??= context.read<CameraProvider>();
+  }
+
+  @override
   void dispose() {
     GestureNavigationGuard.unregisterPageGestures(
       _gestureNavigationController,
       owner: this,
     );
+    _cameraProvider?.stopGestureCamera();
     _homeScrollController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -481,19 +491,20 @@ class _HomePageState extends State<HomePage> {
   void _onItemTapped(int index) {
     if (_selectedIndex == index) return;
 
+    final wasOnHome = _selectedIndex == 0;
+
     setState(() {
       _selectedIndex = index;
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
       if (_selectedIndex == 0) {
         _registerHomeGestureActionsIfNeeded();
         _setupHomeGestureCameraIfNeeded();
-      } else {
-        GestureNavigationGuard.unregisterPageGestures(
-          _gestureNavigationController,
-          owner: this,
-        );
+      } else if (wasOnHome) {
+        _stopHomeGestureCameraAndActions();
       }
     });
   }
@@ -504,18 +515,88 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _setupHomeGestureCameraIfNeeded() async {
     if (!mounted || _selectedIndex != 0) return;
-    if (!_isGestureNavigationModeOn()) return;
+
+    if (!_isGestureNavigationModeOn()) {
+      await _stopHomeGestureCameraAndActions();
+      return;
+    }
 
     try {
-      final cameraProvider = context.read<CameraProvider>();
+      final cameraProvider = _cameraProvider ?? context.read<CameraProvider>();
+      _cameraProvider = cameraProvider;
+
       cameraProvider.setGestureNavigationController(_gestureNavigationController);
 
       if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
         await cameraProvider.initializeCamera();
         if (!mounted) return;
+      } else if (cameraProvider.isInitialized && !cameraProvider.isStreaming) {
+        cameraProvider.startGestureStream();
       }
     } catch (e) {
       debugPrint('[HomePage] Gesture camera setup skipped: $e');
+    }
+  }
+
+  Future<void> _stopHomeGestureCameraAndActions() async {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+
+    try {
+      final cameraProvider = _cameraProvider ?? context.read<CameraProvider>();
+      _cameraProvider = cameraProvider;
+      await cameraProvider.stopGestureCamera();
+    } catch (e) {
+      debugPrint('[HomePage] Gesture camera stop skipped: $e');
+    }
+  }
+
+  Future<void> _setGestureModeFromHome(bool value) async {
+    if (_isUpdatingGestureMode) return;
+
+    setState(() {
+      _isUpdatingGestureMode = true;
+    });
+
+    try {
+      await AccessibilityController.setGestureNavigationMode(value);
+
+      if (!mounted) return;
+
+      if (value) {
+        _registerHomeGestureActionsIfNeeded();
+        await _setupHomeGestureCameraIfNeeded();
+      } else {
+        await _stopHomeGestureCameraAndActions();
+      }
+
+      if (!mounted) return;
+
+      _showCustomSnackBar(
+        message: value
+            ? 'Gesture Mode diaktifkan dari Beranda'
+            : 'Gesture Mode dimatikan',
+        icon: value ? Icons.front_hand_rounded : Icons.front_hand_outlined,
+        backgroundColor: value ? const Color(0xFF16A34A) : Colors.orange,
+        isHighContrast: AccessibilityController.highContrastNotifier.value,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      _showCustomSnackBar(
+        message: 'Gagal mengubah Gesture Mode',
+        icon: Icons.error_outline_rounded,
+        backgroundColor: Colors.red,
+        isHighContrast: AccessibilityController.highContrastNotifier.value,
+      );
+    } finally {
+      if (!mounted) return;
+
+      setState(() {
+        _isUpdatingGestureMode = false;
+      });
     }
   }
 
@@ -642,6 +723,14 @@ class _HomePageState extends State<HomePage> {
 
   void _registerHomeGestureActionsIfNeeded() {
     if (!mounted || _selectedIndex != 0) return;
+
+    if (!_isGestureNavigationModeOn()) {
+      GestureNavigationGuard.unregisterPageGestures(
+        _gestureNavigationController,
+        owner: this,
+      );
+      return;
+    }
 
     // Re-register listener karena controller singleton dan callback
     // onActionResult bisa ditimpa oleh halaman lain.
@@ -851,9 +940,15 @@ class _HomePageState extends State<HomePage> {
                   _setupHomeGestureCameraIfNeeded();
                 });
 
-                return const MiniCameraPreview(
-                  width: 86,
-                  height: 116,
+                return const Positioned(
+                  right: 16,
+                  bottom: 92,
+                  child: IgnorePointer(
+                    child: MiniCameraPreview(
+                      width: 78,
+                      height: 104,
+                    ),
+                  ),
                 );
               },
             ),
@@ -1031,6 +1126,138 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildAccessibilityGestureModeRow() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: AccessibilityController.highContrastNotifier,
+      builder: (context, isHighContrast, _) {
+        return Row(
+          children: [
+            Expanded(
+              child: _buildCompactModeToggleCard(
+                icon: Icons.visibility_rounded,
+                title: 'Kontras Tinggi',
+                value: isHighContrast,
+                isHighContrast: isHighContrast,
+                onChanged: (value) {
+                  AccessibilityController.setHighContrast(value);
+
+                  _showCustomSnackBar(
+                    message: value
+                        ? 'Mode Kontras Tinggi Diaktifkan'
+                        : 'Mode Kontras Tinggi Dimatikan',
+                    icon: value ? Icons.visibility : Icons.visibility_off,
+                    backgroundColor:
+                        value ? Colors.black : Colors.grey.shade800,
+                    isHighContrast: value,
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ValueListenableBuilder<bool>(
+                valueListenable:
+                    AccessibilityController.gestureNavigationModeNotifier,
+                builder: (context, isGestureModeOn, __) {
+                  return _buildCompactModeToggleCard(
+                    icon: Icons.front_hand_rounded,
+                    title: 'Gesture Mode',
+                    value: isGestureModeOn,
+                    isHighContrast: isHighContrast,
+                    isLoading: _isUpdatingGestureMode,
+                    onChanged: _setGestureModeFromHome,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCompactModeToggleCard({
+    required IconData icon,
+    required String title,
+    required bool value,
+    required bool isHighContrast,
+    required ValueChanged<bool> onChanged,
+    bool isLoading = false,
+  }) {
+    final mainColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+
+    final backgroundColor = isHighContrast
+        ? AccessibilityTheme.darkCard
+        : AppColors.primaryNavy.withOpacity(0.05);
+
+    final borderColor = isHighContrast
+        ? AccessibilityTheme.yellow
+        : AppColors.primaryNavy.withOpacity(0.10);
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 64),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: borderColor,
+          width: isHighContrast ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: mainColor,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.bold,
+                height: 1.15,
+                color: mainColor,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          if (isLoading)
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                color: mainColor,
+              ),
+            )
+          else
+            Transform.scale(
+              scale: 0.78,
+              child: Switch(
+                value: value,
+                activeThumbColor:
+                    isHighContrast ? AccessibilityTheme.yellow : mainColor,
+                activeTrackColor: isHighContrast
+                    ? AccessibilityTheme.yellow.withOpacity(0.35)
+                    : AppColors.primaryNavy.withOpacity(0.30),
+                onChanged: onChanged,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBeranda(BuildContext context) {
     final theme = Theme.of(context);
     _syncJobItemKeys();
@@ -1089,81 +1316,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            ValueListenableBuilder<bool>(
-              valueListenable: AccessibilityController.highContrastNotifier,
-              builder: (context, isHighContrast, _) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isHighContrast
-                        ? Colors.black
-                        : AppColors.primaryNavy.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: isHighContrast
-                        ? Border.all(
-                            color: Colors.yellow,
-                            width: 2,
-                          )
-                        : null,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.visibility,
-                              size: 20,
-                              color: isHighContrast
-                                  ? Colors.yellow
-                                  : AppColors.primaryNavy,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Mode Kontras Tinggi',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isHighContrast
-                                      ? Colors.yellow
-                                      : AppColors.primaryNavy,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: isHighContrast,
-                        activeThumbColor: Colors.yellow,
-                        activeTrackColor: Colors.grey.shade800,
-                        onChanged: (value) {
-                          AccessibilityController.setHighContrast(value);
-                          _showCustomSnackBar(
-                            message: value
-                                ? 'Mode Kontras Tinggi Diaktifkan'
-                                : 'Mode Kontras Tinggi Dimatikan',
-                            icon: value
-                                ? Icons.visibility
-                                : Icons.visibility_off,
-                            backgroundColor:
-                                value ? Colors.black : Colors.grey.shade800,
-                            isHighContrast: value,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            _buildAccessibilityGestureModeRow(),
             const SizedBox(height: 24),
             Row(
               children: [
