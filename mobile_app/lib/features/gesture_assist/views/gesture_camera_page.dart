@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../providers/camera_provider.dart';
@@ -28,58 +29,39 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
     _navigationController.onActionResult((result) {
       if (!mounted) return;
 
-      // Show SnackBar feedback
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (result.isSuccess) {
+        HapticFeedback.lightImpact();
+      } else {
+        HapticFeedback.selectionClick();
+      }
+
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
             result.message ?? 'Action',
             style: const TextStyle(color: Colors.white),
           ),
-          backgroundColor: result.isSuccess ? Colors.green : Colors.red,
+          backgroundColor: result.isSuccess
+              ? Colors.green
+              : _feedbackColor(result.message),
           duration: const Duration(milliseconds: 1500),
+          behavior: SnackBarBehavior.floating,
         ),
       );
     });
 
-    // ============================================================
-    // REGISTER GESTURE ACTION CALLBACKS
-    // ============================================================
-
-    // CONFIRM ACTION (Thumbs Up)
-    _navigationController.registerConfirmAction(() async {
-      debugPrint('✅ [GestureCamera] CONFIRM action triggered (Thumbs Up)');
-      // TODO: Implement confirm action untuk page ini
-      // Misalnya: submit form, apply untuk job, dll
-      // For now, just return true (success)
-      return true;
-    });
-
-    // NEXT ACTION (Open Palm)
-    _navigationController.registerNextAction(() async {
-      debugPrint('👉 [GestureCamera] NEXT action triggered (Open Palm)');
-      // TODO: Implement next action untuk page ini
-      // Misalnya: scroll ke bawah, navigate ke job berikutnya, dll
-      // For now, just return true (success)
-      return true;
-    });
-
-    // BACK ACTION (Fist)
-    _navigationController.registerBackAction(() async {
-      debugPrint('👈 [GestureCamera] BACK action triggered (Fist)');
-      // Try to pop navigator, if possible
-      if (mounted && Navigator.canPop(context)) {
-        Navigator.pop(context);
-        return true;
-      }
-      // If can't pop, stay on this page
-      return false;
-    });
+    // GestureCameraPage hanya menjadi input deteksi gesture.
+    // Jangan register dummy action di sini, karena action aktif harus berasal
+    // dari halaman JobAble yang sedang aktif: Home, JobDetail, atau ApplyJob.
 
     // Initialize camera on start
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<CameraProvider>();
       provider.initializeCamera();
-      
+
       // Wire BOTH controllers to provider
       // GestureNavigationController will be used (newer, dengan cooldown notif)
       // GestureActionController sebagai fallback
@@ -88,9 +70,24 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
     });
   }
 
+  Color _feedbackColor(String? message) {
+    final text = (message ?? '').toLowerCase();
+
+    if (text.contains('cooldown') ||
+        text.contains('belum stabil') ||
+        text.contains('confidence') ||
+        text.contains('nonaktif') ||
+        text.contains('diproses')) {
+      return Colors.orange;
+    }
+
+    return Colors.red;
+  }
+
   @override
   void dispose() {
-    _navigationController.dispose();
+    // Jangan dispose GestureNavigationController di sini.
+    // Controller ini singleton/shared dan callback-nya dimiliki halaman JobAble.
     super.dispose();
   }
 
@@ -224,8 +221,8 @@ class _GestureStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-  final String gesture = provider.detectedGesture ?? 'none';
-  final action = _mapActionLabel(gesture);
+    final String gesture = provider.detectedGesture ?? 'none';
+    final action = _mapActionLabel(gesture);
 
     return Container(
       padding: const EdgeInsets.symmetric(

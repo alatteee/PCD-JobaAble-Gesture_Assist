@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
 import 'application_success_page.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/widgets/mini_camera_preview.dart';
+import '../gesture_assist/providers/camera_provider.dart';
+import '../profile/accessibility_settings_view.dart';
 
 class ApplyJobPage extends StatefulWidget {
   final Map<String, dynamic> job;
@@ -22,7 +28,12 @@ class ApplyJobPage extends StatefulWidget {
 
 class _ApplyJobPageState extends State<ApplyJobPage> {
   final TextEditingController _messageController = TextEditingController();
+  final ScrollController _applyScrollController = ScrollController();
+  final GestureNavigationController _gestureNavigationController =
+      GestureNavigationController();
+
   bool _isSubmitting = false;
+  bool _isGestureSubmitRunning = false;
   int _messageLength = 0;
 
   static const int _maxMessageLength = 100;
@@ -31,17 +42,190 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
   void initState() {
     super.initState();
 
+    // Set userId untuk gesture logging.
+    final userId = widget.currentUser['_id']?.toString() ??
+        widget.currentUser['id']?.toString() ??
+        widget.currentUser['user_id']?.toString() ??
+        widget.currentUser['email']?.toString() ??
+        '';
+    _gestureNavigationController.setUserId(userId);
+
     _messageController.addListener(() {
       setState(() {
         _messageLength = _messageController.text.length;
       });
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _setupApplyGestureCameraIfNeeded();
+      if (!mounted) return;
+      _registerGestureActions();
+    });
   }
 
   @override
   void dispose() {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+    _applyScrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  bool _isGestureNavigationModeOn() {
+    return AccessibilityController.gestureNavigationModeNotifier.value;
+  }
+
+  Future<void> _setupApplyGestureCameraIfNeeded() async {
+    if (!mounted) return;
+    if (!_isGestureNavigationModeOn()) return;
+
+    try {
+      final cameraProvider = context.read<CameraProvider>();
+
+      // Penting: sambungkan detection ke controller halaman Apply Job.
+      cameraProvider.setGestureNavigationController(_gestureNavigationController);
+
+      if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
+        await cameraProvider.initializeCamera();
+        if (!mounted) return;
+      }
+
+      // Kalau kamera sudah initialized tetapi stream berhenti saat pindah halaman,
+      // aktifkan lagi agar gesture tetap terbaca di ApplyJobPage.
+      if (cameraProvider.isInitialized && !cameraProvider.isStreaming) {
+        cameraProvider.toggleStream();
+      }
+
+      if (mounted) {
+        _registerGestureActions();
+      }
+    } catch (e) {
+      debugPrint('[ApplyJobPage] Gesture camera setup skipped: $e');
+    }
+  }
+
+  void _registerGestureActions() {
+    if (!mounted) return;
+
+    GestureNavigationGuard.registerPageGestures(
+      controller: _gestureNavigationController,
+      owner: this,
+      screenContext: 'apply_job',
+      scrollController: _applyScrollController,
+      onNext: _handleGestureScrollApply,
+      onBack: _handleGestureBack,
+      onConfirm: _handleGestureSubmit,
+    );
+
+    _gestureNavigationController.printStatus();
+  }
+
+  Future<bool> _handleGestureScrollApply() async {
+    if (!mounted) return false;
+
+    if (!_applyScrollController.hasClients) {
+      _showCustomSnackBar(
+        'Halaman belum siap discroll',
+        icon: Icons.warning_amber_rounded,
+      );
+      return false;
+    }
+
+    final currentOffset = _applyScrollController.offset;
+    final maxOffset = _applyScrollController.position.maxScrollExtent;
+
+    if (currentOffset >= maxOffset) {
+      _showCustomSnackBar(
+        'Sudah berada di bagian paling bawah',
+        icon: Icons.info_outline,
+      );
+      return false;
+    }
+
+    final nextOffset = (currentOffset + 320.0).clamp(0.0, maxOffset);
+
+    await _applyScrollController.animateTo(
+      nextOffset,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+    );
+
+    _showCustomSnackBar(
+      'Scroll halaman lamar kerja',
+      icon: Icons.check_circle_rounded,
+    );
+    return true;
+  }
+
+  Future<bool> _handleGestureBack() async {
+    if (!mounted) return false;
+
+    final popped = await Navigator.maybePop(context);
+
+    if (!popped && mounted) {
+      _showCustomSnackBar(
+        'Tidak ada halaman sebelumnya untuk kembali',
+        icon: Icons.warning_amber_rounded,
+      );
+    }
+
+    return popped;
+  }
+
+  Future<bool> _handleGestureSubmit() async {
+    if (!mounted) return false;
+
+    if (_isSubmitting || _isGestureSubmitRunning) {
+      _showCustomSnackBar(
+        'Lamaran sedang diproses',
+        icon: Icons.hourglass_bottom,
+      );
+      return false;
+    }
+
+    final message = _messageController.text.trim();
+
+    if (_userId.isEmpty || _jobId.isEmpty) {
+      _showCustomSnackBar(
+        'Data pengguna atau lowongan tidak valid',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    if (_fullName.trim().isEmpty ||
+        _email.trim().isEmpty ||
+        _phone.trim().isEmpty) {
+      _showCustomSnackBar(
+        'Data diri belum lengkap',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    if (message.length > _maxMessageLength) {
+      _showCustomSnackBar(
+        'Pesan maksimal 100 karakter',
+        icon: Icons.error_outline,
+      );
+      return false;
+    }
+
+    _isGestureSubmitRunning = true;
+
+    try {
+      _showCustomSnackBar(
+        'Mengirim lamaran',
+        icon: Icons.check_circle_rounded,
+      );
+
+      return await _submitApplication();
+    } finally {
+      _isGestureSubmitRunning = false;
+    }
   }
 
   String get _jobId => MongoService.getMongoId(widget.job['_id']);
@@ -115,8 +299,8 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
     );
   }
 
-  Future<void> _submitApplication() async {
-    if (_isSubmitting) return;
+  Future<bool> _submitApplication() async {
+    if (_isSubmitting) return false;
 
     final message = _messageController.text.trim();
 
@@ -125,15 +309,17 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         'Data pengguna atau lowongan tidak valid',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
-    if (_fullName.trim().isEmpty || _email.trim().isEmpty || _phone.trim().isEmpty) {
+    if (_fullName.trim().isEmpty ||
+        _email.trim().isEmpty ||
+        _phone.trim().isEmpty) {
       _showCustomSnackBar(
         'Data diri belum lengkap',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
     if (message.length > _maxMessageLength) {
@@ -141,84 +327,99 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
         'Pesan maksimal 100 karakter',
         icon: Icons.error_outline,
       );
-      return;
+      return false;
     }
 
     setState(() {
       _isSubmitting = true;
     });
 
-    final alreadyApplied = await MongoService.hasAppliedJob(
-      userId: _userId,
-      jobId: _jobId,
-    );
-
-    if (!mounted) return;
-
-    if (alreadyApplied) {
-      setState(() {
-        _isSubmitting = false;
-      });
-      _showCustomSnackBar(
-        'Kamu sudah pernah melamar lowongan ini',
-        icon: Icons.info_outline,
+    try {
+      final alreadyApplied = await MongoService.hasAppliedJob(
+        userId: _userId,
+        jobId: _jobId,
       );
-      return;
-    }
 
-    final success = await MongoService.submitJobApplication(
-      applicationData: {
-        'user_id': _userId,
-        'job_id': _jobId,
-        'job_title': _jobTitle,
-        'company_name': _companyName,
-        'full_name': _fullName,
-        'email': _email,
-        'phone': _phone,
-        'message': message,
-        'status': 'pending',
-        'job_photo': widget.job['job_photo'], // Tambahkan ini agar foto tersimpan di koleksi lamaran
-        'sync_status': 'synced',
-        'created_at': DateTime.now().toUtc(),
-      },
-    );
+      if (!mounted) return false;
 
-    if (!mounted) return;
-
-    setState(() {
-      _isSubmitting = false;
-    });
-
-    if (success) {
-      // Trigger notification for company
-      final jobData = widget.job;
-      final companyId = jobData['company_id'];
-      
-      if (companyId != null) {
-        await MongoService.createNotification(
-          receiverId: companyId,
-          receiverRole: 'company',
-          senderId: _userId,
-          senderRole: 'job_seeker',
-          applicationId: '', // Will be updated on refresh if needed, or leave empty
-          jobId: _jobId,
-          title: 'Pelamar Baru',
-          message: '$_fullName telah melamar untuk posisi $_jobTitle.',
-          type: 'new_applicant',
+      if (alreadyApplied) {
+        _showCustomSnackBar(
+          'Kamu sudah pernah melamar lowongan ini',
+          icon: Icons.info_outline,
         );
+        return false;
       }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ApplicationSuccessPage(currentUser: widget.currentUser),
-        ),
+      final success = await MongoService.submitJobApplication(
+        applicationData: {
+          'user_id': _userId,
+          'job_id': _jobId,
+          'job_title': _jobTitle,
+          'company_name': _companyName,
+          'full_name': _fullName,
+          'email': _email,
+          'phone': _phone,
+          'message': message,
+          'status': 'pending',
+          'job_photo': widget.job['job_photo'],
+          'sync_status': 'synced',
+          'created_at': DateTime.now().toUtc(),
+        },
       );
-    } else {
+
+      if (!mounted) return false;
+
+      if (success) {
+        final jobData = widget.job;
+        final companyId = jobData['company_id'];
+
+        if (companyId != null) {
+          await MongoService.createNotification(
+            receiverId: companyId,
+            receiverRole: 'company',
+            senderId: _userId,
+            senderRole: 'job_seeker',
+            applicationId: '',
+            jobId: _jobId,
+            title: 'Pelamar Baru',
+            message: '$_fullName telah melamar untuk posisi $_jobTitle.',
+            type: 'new_applicant',
+          );
+        }
+
+        if (!mounted) return true;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ApplicationSuccessPage(
+              currentUser: widget.currentUser,
+            ),
+          ),
+        );
+
+        return true;
+      }
+
       _showCustomSnackBar(
         'Lamaran gagal dikirim',
         icon: Icons.error_outline,
       );
+      return false;
+    } catch (e) {
+      if (mounted) {
+        _showCustomSnackBar(
+          'Terjadi kesalahan saat mengirim lamaran',
+          icon: Icons.error_outline,
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
   }
 
@@ -229,126 +430,155 @@ class _ApplyJobPageState extends State<ApplyJobPage> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
-              child: _Header(
-                title: 'Lamar Sekarang',
-                onBack: () => Navigator.pop(context),
-              ),
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _JobSummaryCard(
-                      title: _jobTitle,
-                      company: _companyName,
-                      location: _location,
-                      jobType: _jobType,
-                      jobPhoto: widget.job['job_photo'], // Tambahkan ini
-                    ),
-                    const SizedBox(height: 22),
-                    Text(
-                      'Data Diri',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      'Data Diambil dari profil kamu. Pastikan sudah benar.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _InfoField(
-                      icon: Icons.person,
-                      label: 'Nama Lengkap',
-                      value: _fullName.isEmpty ? '-' : _fullName,
-                    ),
-                    const SizedBox(height: 13),
-                    _InfoField(
-                      icon: Icons.email_outlined,
-                      label: 'Email',
-                      value: _email.isEmpty ? '-' : _email,
-                    ),
-                    const SizedBox(height: 13),
-                    _InfoField(
-                      icon: Icons.phone,
-                      label: 'No. Handphone',
-                      value: _phone.isEmpty ? '-' : _phone,
-                    ),
-                    const SizedBox(height: 26),
-                    Text(
-                      'Pesan untuk Perusahaan (Opsional)',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Tulis pesan singkat untuk memperkenalkan dirimu',
-                      style: TextStyle(fontSize: 11, color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray),
-                    ),
-                    const SizedBox(height: 12),
-                    _MessageBox(
-                      controller: _messageController,
-                      maxLength: _maxMessageLength,
-                      currentLength: _messageLength,
-                    ),
-                    const SizedBox(height: 26),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 55,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSubmitting ? null : _submitApplication,
-                        icon: _isSubmitting
-                            ? SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
-                                ),
-                              )
-                            : Icon(Icons.send_outlined, color: isDark ? Colors.black : Colors.white, size: 24),
-                        label: Text(
-                          _isSubmitting ? 'Mengirim...' : 'Kirim Lamaran',
-                          style: TextStyle(
-                            color: isDark ? Colors.black : Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.primary,
-                          disabledBackgroundColor: theme.colorScheme.primary.withOpacity(0.65),
-                          elevation: 4,
-                          shadowColor: Colors.black26,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
+                  child: _Header(
+                    title: 'Lamar Sekarang',
+                    onBack: () => Navigator.maybePop(context),
+                  ),
                 ),
-              ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _applyScrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _JobSummaryCard(
+                          title: _jobTitle,
+                          company: _companyName,
+                          location: _location,
+                          jobType: _jobType,
+                          jobPhoto: widget.job['job_photo'], // Tambahkan ini
+                        ),
+                        const SizedBox(height: 22),
+                        Text(
+                          'Data Diri',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Data Diambil dari profil kamu. Pastikan sudah benar.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _InfoField(
+                          icon: Icons.person,
+                          label: 'Nama Lengkap',
+                          value: _fullName.isEmpty ? '-' : _fullName,
+                        ),
+                        const SizedBox(height: 13),
+                        _InfoField(
+                          icon: Icons.email_outlined,
+                          label: 'Email',
+                          value: _email.isEmpty ? '-' : _email,
+                        ),
+                        const SizedBox(height: 13),
+                        _InfoField(
+                          icon: Icons.phone,
+                          label: 'No. Handphone',
+                          value: _phone.isEmpty ? '-' : _phone,
+                        ),
+                        const SizedBox(height: 26),
+                        Text(
+                          'Pesan untuk Perusahaan (Opsional)',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Tulis pesan singkat untuk memperkenalkan dirimu',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.yellow.withOpacity(0.7) : AppColors.textGray),
+                        ),
+                        const SizedBox(height: 12),
+                        _MessageBox(
+                          controller: _messageController,
+                          maxLength: _maxMessageLength,
+                          currentLength: _messageLength,
+                        ),
+                        const SizedBox(height: 26),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 55,
+                          child: ElevatedButton.icon(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () {
+                                    _submitApplication();
+                                  },
+                            icon: _isSubmitting
+                                ? SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(isDark ? Colors.black : Colors.white),
+                                    ),
+                                  )
+                                : Icon(Icons.send_outlined, color: isDark ? Colors.black : Colors.white, size: 24),
+                            label: Text(
+                              _isSubmitting ? 'Mengirim...' : 'Kirim Lamaran',
+                              style: TextStyle(
+                                color: isDark ? Colors.black : Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.colorScheme.primary,
+                              disabledBackgroundColor: theme.colorScheme.primary.withOpacity(0.65),
+                              elevation: 4,
+                              shadowColor: Colors.black26,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          // Floating Mini Camera Preview untuk Gesture Navigation Mode.
+          ValueListenableBuilder<bool>(
+            valueListenable:
+                AccessibilityController.gestureNavigationModeNotifier,
+            builder: (context, isGestureModeOn, _) {
+              if (!isGestureModeOn) {
+                return const SizedBox.shrink();
+              }
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _setupApplyGestureCameraIfNeeded();
+              });
+
+              return const MiniCameraPreview(
+                width: 86,
+                height: 116,
+              );
+            },
+          ),
+        ],
       ),
     );
   }

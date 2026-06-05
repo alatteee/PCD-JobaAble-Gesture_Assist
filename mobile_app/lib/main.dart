@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:provider/provider.dart';
 import 'core/constants/app_colors.dart';
 import 'features/gesture_assist/models/gesture_log_model.dart';
+import 'features/gesture_assist/providers/camera_provider.dart';
 import 'features/profile/accessibility_settings_view.dart';
 import 'features/splash/splash_view.dart';
 import 'services/mongo_service.dart';
@@ -12,21 +14,21 @@ import 'services/offline_service.dart';
 import 'services/sync_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Handle Mongo/Socket errors to prevent red screen of death
-  FlutterError.onError = (FlutterErrorDetails details) {
-    final errorText = details.exceptionAsString();
-
-    if (_isIgnoredMongoSocketError(errorText)) {
-      print('⚠️ Ignored Mongo socket disconnect from FlutterError: $errorText');
-      return;
-    }
-
-    FlutterError.presentError(details);
-  };
-
   runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Handle Mongo/Socket errors to prevent red screen of death
+    FlutterError.onError = (FlutterErrorDetails details) {
+      final errorText = details.exceptionAsString();
+
+      if (_isIgnoredMongoSocketError(errorText)) {
+        print('⚠️ Ignored Mongo socket disconnect from FlutterError: $errorText');
+        return;
+      }
+
+      FlutterError.presentError(details);
+    };
+
     await dotenv.load(fileName: ".env");
     await OfflineService.init();
     await MongoService.connect();
@@ -37,7 +39,14 @@ void main() async {
     }
     await Hive.openBox<GestureLogModel>('gestureLogs');
 
-    runApp(const JobAbleApp());
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => CameraProvider()),
+        ],
+        child: const JobAbleApp(),
+      ),
+    );
   }, (error, stack) {
     final errorText = error.toString();
 

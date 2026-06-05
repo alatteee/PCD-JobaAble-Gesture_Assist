@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
 import '../../core/constants/app_colors.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
 import '../gesture_assist/views/gesture_guide_page.dart';
 
 enum AccessibilityTextSize {
@@ -69,6 +72,9 @@ class AccessibilityTheme {
 }
 
 class AccessibilityController {
+  static const String _settingsBoxName = 'accessibilitySettings';
+  static const String _gestureNavigationModeKey = 'gestureNavigationMode';
+
   static final ValueNotifier<AccessibilityTextSize> textSizeNotifier =
       ValueNotifier<AccessibilityTextSize>(AccessibilityTextSize.medium);
 
@@ -77,6 +83,14 @@ class AccessibilityController {
 
   static final ValueNotifier<bool> highContrastNotifier =
       ValueNotifier<bool>(false);
+
+  static final ValueNotifier<bool> gestureNavigationModeNotifier =
+      ValueNotifier<bool>(false);
+
+  static bool _isInitialized = false;
+
+  static bool get isGestureNavigationEnabled =>
+      gestureNavigationModeNotifier.value;
 
   static String get textSizeLabel {
     switch (textSizeNotifier.value) {
@@ -89,6 +103,37 @@ class AccessibilityController {
       case AccessibilityTextSize.extraLarge:
         return 'Sangat Besar';
     }
+  }
+
+  static Future<void> init() async {
+    if (_isInitialized) return;
+
+    final box = await _openSettingsBox();
+    final savedGestureMode = box.get(
+      _gestureNavigationModeKey,
+      defaultValue: false,
+    );
+
+    gestureNavigationModeNotifier.value = savedGestureMode == true;
+
+    GestureNavigationController().syncGestureNavigationMode(
+      gestureNavigationModeNotifier.value,
+    );
+
+    debugPrint(
+      '[Accessibility] Gesture Navigation Mode init: '
+      '${gestureNavigationModeNotifier.value} | Hive=$savedGestureMode',
+    );
+
+    _isInitialized = true;
+  }
+
+  static Future<Box<dynamic>> _openSettingsBox() async {
+    if (Hive.isBoxOpen(_settingsBoxName)) {
+      return Hive.box<dynamic>(_settingsBoxName);
+    }
+
+    return Hive.openBox<dynamic>(_settingsBoxName);
   }
 
   static void increaseTextSize() {
@@ -145,6 +190,20 @@ class AccessibilityController {
   static void setHighContrast(bool value) {
     highContrastNotifier.value = value;
   }
+
+  static Future<void> setGestureNavigationMode(bool value) async {
+    gestureNavigationModeNotifier.value = value;
+
+    final box = await _openSettingsBox();
+    await box.put(_gestureNavigationModeKey, value);
+
+    GestureNavigationController().syncGestureNavigationMode(value);
+
+    debugPrint(
+      '[Accessibility] Gesture Navigation Mode saved: '
+      '$value | Hive=${box.get(_gestureNavigationModeKey)}',
+    );
+  }
 }
 
 class AccessibilitySettingsView extends StatelessWidget {
@@ -152,140 +211,152 @@ class AccessibilitySettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: AccessibilityController.highContrastNotifier,
-      builder: (context, isHighContrast, _) {
-        final bgColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
-        final mainColor =
-            isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-        final textColor =
-            isHighContrast ? AccessibilityTheme.yellow : Colors.black87;
-        final cardColor =
-            isHighContrast ? AccessibilityTheme.darkCard : const Color(0xFFDCE7FF);
+    return FutureBuilder<void>(
+      future: AccessibilityController.init(),
+      builder: (context, snapshot) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: AccessibilityController.highContrastNotifier,
+          builder: (context, isHighContrast, _) {
+            final bgColor =
+                isHighContrast ? AccessibilityTheme.black : Colors.white;
+            final mainColor = isHighContrast
+                ? AccessibilityTheme.yellow
+                : AppColors.primaryNavy;
+            final textColor =
+                isHighContrast ? AccessibilityTheme.yellow : Colors.black87;
+            final cardColor = isHighContrast
+                ? AccessibilityTheme.darkCard
+                : const Color(0xFFDCE7FF);
 
-        return Scaffold(
-          backgroundColor: bgColor,
-          appBar: AppBar(
-            backgroundColor: bgColor,
-            elevation: 0,
-            leading: IconButton(
-              icon: Icon(Icons.arrow_back, color: mainColor),
-              onPressed: () => Navigator.pop(context),
-            ),
-            title: Text(
-              'Pengaturan Aksesibilitas',
-              style: TextStyle(
-                color: mainColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
+            return Scaffold(
+              backgroundColor: bgColor,
+              appBar: AppBar(
+                backgroundColor: bgColor,
+                elevation: 0,
+                leading: IconButton(
+                  icon: Icon(Icons.arrow_back, color: mainColor),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                title: Text(
+                  'Pengaturan Aksesibilitas',
+                  style: TextStyle(
+                    color: mainColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                  ),
+                ),
+                centerTitle: false,
               ),
-            ),
-            centerTitle: false,
-          ),
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ukuran Teks',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  ValueListenableBuilder<AccessibilityTextSize>(
-                    valueListenable: AccessibilityController.textSizeNotifier,
-                    builder: (context, textSize, _) {
-                      return Row(
-                        children: [
-                          Expanded(
-                            child: _TextSizeButton(
-                              label: 'A-',
-                              isBold: true,
-                              onTap: AccessibilityController.decreaseTextSize,
-                              isHighContrast: isHighContrast,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _TextSizeButton(
-                              label: AccessibilityController.textSizeLabel,
-                              onTap: () {},
-                              isHighContrast: isHighContrast,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _TextSizeButton(
-                              label: 'A+',
-                              isBold: true,
-                              onTap: AccessibilityController.increaseTextSize,
-                              isHighContrast: isHighContrast,
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 22),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 22,
-                    ),
-                    decoration: BoxDecoration(
-                      color: cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: isHighContrast
-                          ? Border.all(color: AccessibilityTheme.yellow)
-                          : null,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(
-                            isHighContrast ? 0.35 : 0.22,
-                          ),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
+              body: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Ukuran Teks',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
                         ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.accessible,
-                          color: mainColor,
-                          size: 34,
+                      ),
+                      const SizedBox(height: 14),
+                      ValueListenableBuilder<AccessibilityTextSize>(
+                        valueListenable:
+                            AccessibilityController.textSizeNotifier,
+                        builder: (context, textSize, _) {
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: _TextSizeButton(
+                                  label: 'A-',
+                                  isBold: true,
+                                  onTap:
+                                      AccessibilityController.decreaseTextSize,
+                                  isHighContrast: isHighContrast,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _TextSizeButton(
+                                  label:
+                                      AccessibilityController.textSizeLabel,
+                                  onTap: () {},
+                                  isHighContrast: isHighContrast,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _TextSizeButton(
+                                  label: 'A+',
+                                  isBold: true,
+                                  onTap:
+                                      AccessibilityController.increaseTextSize,
+                                  isHighContrast: isHighContrast,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 22),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 22,
                         ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: Text(
-                            'Pengaturan ini membantu meningkatkan\nkenyamanan penggunaan aplikasi',
-                            style: TextStyle(
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(16),
+                          border: isHighContrast
+                              ? Border.all(color: AccessibilityTheme.yellow)
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(
+                                isHighContrast ? 0.35 : 0.22,
+                              ),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.accessible,
                               color: mainColor,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              height: 1.25,
+                              size: 34,
                             ),
-                          ),
+                            const SizedBox(width: 18),
+                            Expanded(
+                              child: Text(
+                                'Pengaturan ini membantu meningkatkan\nkenyamanan penggunaan aplikasi',
+                                style: TextStyle(
+                                  color: mainColor,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 18),
+                      _GestureGuideMenu(
+                        isHighContrast: isHighContrast,
+                        mainColor: mainColor,
+                        textColor: textColor,
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 18),
-                  _GestureGuideMenu(
-                    isHighContrast: isHighContrast,
-                    mainColor: mainColor,
-                    textColor: textColor,
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );

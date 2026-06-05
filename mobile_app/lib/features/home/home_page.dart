@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../services/mongo_service.dart';
@@ -11,6 +12,10 @@ import '../profile/profile_controller.dart';
 
 import '../notifications/notification_page.dart';
 import '../cv/cv_view.dart';
+import '../gesture_assist/controllers/gesture_navigation_controller.dart';
+import '../gesture_assist/providers/camera_provider.dart';
+import '../gesture_assist/utils/gesture_navigation_guard.dart';
+import '../gesture_assist/widgets/mini_camera_preview.dart';
 
 class HomePage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -38,6 +43,9 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   bool isLoadingProfileName = true;
   bool _isOpeningNotificationPage = false;
+  bool _isUpdatingGestureMode = false;
+
+  CameraProvider? _cameraProvider;
 
   String? namaLengkap;
 
@@ -45,12 +53,26 @@ class _HomePageState extends State<HomePage> {
   String searchQuery = '';
 
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _homeScrollController = ScrollController();
+  final List<GlobalKey> _jobItemKeys = [];
+  final GestureNavigationController _gestureNavigationController =
+      GestureNavigationController();
+
+  int _currentFocusedJobIndex = 0;
 
   @override
   void initState() {
     super.initState();
 
     _selectedIndex = widget.initialIndex.clamp(0, 3).toInt();
+
+    // Set userId untuk gesture logging lokal
+    _gestureNavigationController.setUserId(_currentUserId);
+
+    // Listener feedback global dari GestureNavigationController.
+    // Ini penting supaya feedback seperti cooldown/nonaktif/confidence rendah
+    // bisa muncul di HomePage, bukan hanya muncul di terminal.
+    _setupHomeGestureFeedbackListener();
 
     if (widget.showSuccessDialog) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -60,10 +82,27 @@ class _HomePageState extends State<HomePage> {
 
     fetchProfileName();
     fetchJobs();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _cameraProvider ??= context.read<CameraProvider>();
   }
 
   @override
   void dispose() {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+    _cameraProvider?.stopGestureCamera();
+    _homeScrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -182,7 +221,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> toggleSaveJob(Map<String, dynamic> job, bool isHighContrast) async {
+  Future<void> toggleSaveJob(
+    Map<String, dynamic> job,
+    bool isHighContrast,
+  ) async {
     final jobId = _jobIdOf(job);
 
     if (_currentUserId.isEmpty || jobId.isEmpty) {
@@ -248,20 +290,25 @@ class _HomePageState extends State<HomePage> {
     final snackBar = SnackBar(
       content: Row(
         children: [
-          Icon(icon, color: isHighContrast ? AccessibilityTheme.black : Colors.white),
+          Icon(
+            icon,
+            color: isHighContrast ? AccessibilityTheme.black : Colors.white,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
               message,
               style: TextStyle(
-                color: isHighContrast ? AccessibilityTheme.black : Colors.white,
+                color:
+                    isHighContrast ? AccessibilityTheme.black : Colors.white,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
         ],
       ),
-      backgroundColor: isHighContrast ? AccessibilityTheme.yellow : backgroundColor,
+      backgroundColor:
+          isHighContrast ? AccessibilityTheme.yellow : backgroundColor,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -309,6 +356,16 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       filteredJobs = result;
+      if (filteredJobs.isEmpty) {
+        _currentFocusedJobIndex = 0;
+      } else if (_currentFocusedJobIndex >= filteredJobs.length) {
+        _currentFocusedJobIndex = filteredJobs.length - 1;
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
     });
   }
 
@@ -316,7 +373,7 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent, // Make it transparent
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(40),
@@ -327,10 +384,14 @@ class _HomePageState extends State<HomePage> {
         return ValueListenableBuilder<bool>(
           valueListenable: AccessibilityController.highContrastNotifier,
           builder: (context, isHighContrast, _) {
-            final bgColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
-            final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-            final buttonBgColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-            final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
+            final bgColor =
+                isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+            final textColor =
+                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonBgColor =
+                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final buttonTextColor =
+                isHighContrast ? AccessibilityTheme.black : Colors.white;
 
             return Container(
               height: 440,
@@ -362,7 +423,9 @@ class _HomePageState extends State<HomePage> {
                         child: Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isHighContrast ? Colors.green.withOpacity(0.2) : Colors.green.withOpacity(0.1),
+                            color: isHighContrast
+                                ? Colors.green.withOpacity(0.2)
+                                : Colors.green.withOpacity(0.1),
                           ),
                           padding: const EdgeInsets.all(20),
                           child: const Icon(
@@ -428,9 +491,389 @@ class _HomePageState extends State<HomePage> {
   void _onItemTapped(int index) {
     if (_selectedIndex == index) return;
 
+    final wasOnHome = _selectedIndex == 0;
+
     setState(() {
       _selectedIndex = index;
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      if (_selectedIndex == 0) {
+        _registerHomeGestureActionsIfNeeded();
+        _setupHomeGestureCameraIfNeeded();
+      } else if (wasOnHome) {
+        _stopHomeGestureCameraAndActions();
+      }
+    });
+  }
+
+  bool _isGestureNavigationModeOn() {
+    return AccessibilityController.gestureNavigationModeNotifier.value;
+  }
+
+  Future<void> _setupHomeGestureCameraIfNeeded() async {
+    if (!mounted || _selectedIndex != 0) return;
+
+    if (!_isGestureNavigationModeOn()) {
+      await _stopHomeGestureCameraAndActions();
+      return;
+    }
+
+    try {
+      final cameraProvider = _cameraProvider ?? context.read<CameraProvider>();
+      _cameraProvider = cameraProvider;
+
+      cameraProvider.setGestureNavigationController(_gestureNavigationController);
+
+      if (!cameraProvider.isInitialized && !cameraProvider.isLoading) {
+        await cameraProvider.initializeCamera();
+        if (!mounted) return;
+      } else if (cameraProvider.isInitialized && !cameraProvider.isStreaming) {
+        cameraProvider.startGestureStream();
+      }
+    } catch (e) {
+      debugPrint('[HomePage] Gesture camera setup skipped: $e');
+    }
+  }
+
+  Future<void> _stopHomeGestureCameraAndActions() async {
+    GestureNavigationGuard.unregisterPageGestures(
+      _gestureNavigationController,
+      owner: this,
+    );
+
+    try {
+      final cameraProvider = _cameraProvider ?? context.read<CameraProvider>();
+      _cameraProvider = cameraProvider;
+      await cameraProvider.stopGestureCamera();
+    } catch (e) {
+      debugPrint('[HomePage] Gesture camera stop skipped: $e');
+    }
+  }
+
+  Future<void> _setGestureModeFromHome(bool value) async {
+    if (_isUpdatingGestureMode) return;
+
+    setState(() {
+      _isUpdatingGestureMode = true;
+    });
+
+    try {
+      await AccessibilityController.setGestureNavigationMode(value);
+
+      if (!mounted) return;
+
+      if (value) {
+        _registerHomeGestureActionsIfNeeded();
+        await _setupHomeGestureCameraIfNeeded();
+      } else {
+        await _stopHomeGestureCameraAndActions();
+      }
+
+      if (!mounted) return;
+
+      _showCustomSnackBar(
+        message: value
+            ? 'Gesture Mode diaktifkan dari Beranda'
+            : 'Gesture Mode dimatikan',
+        icon: value ? Icons.front_hand_rounded : Icons.front_hand_outlined,
+        backgroundColor: value ? const Color(0xFF16A34A) : Colors.orange,
+        isHighContrast: AccessibilityController.highContrastNotifier.value,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      _showCustomSnackBar(
+        message: 'Gagal mengubah Gesture Mode',
+        icon: Icons.error_outline_rounded,
+        backgroundColor: Colors.red,
+        isHighContrast: AccessibilityController.highContrastNotifier.value,
+      );
+    } finally {
+      if (!mounted) return;
+
+      setState(() {
+        _isUpdatingGestureMode = false;
+      });
+    }
+  }
+
+  void _syncJobItemKeys() {
+    if (_jobItemKeys.length < filteredJobs.length) {
+      _jobItemKeys.addAll(
+        List.generate(
+          filteredJobs.length - _jobItemKeys.length,
+          (_) => GlobalKey(),
+        ),
+      );
+    } else if (_jobItemKeys.length > filteredJobs.length) {
+      _jobItemKeys.removeRange(filteredJobs.length, _jobItemKeys.length);
+    }
+  }
+
+  String _getJobTitle(Map<String, dynamic> job) {
+    final title = job['title']?.toString().trim();
+    if (title != null && title.isNotEmpty) return title;
+
+    final jobTitle = job['job_title']?.toString().trim();
+    if (jobTitle != null && jobTitle.isNotEmpty) return jobTitle;
+
+    return 'Lowongan';
+  }
+
+  String _selectedJobMessage(Map<String, dynamic> job) {
+    final title = _getJobTitle(job);
+
+    if (title.length <= 34) {
+      return 'Dipilih: $title';
+    }
+
+    return 'Dipilih: ${title.substring(0, 31)}...';
+  }
+
+  Future<void> _scrollToFocusedJob() async {
+    if (!mounted) return;
+
+    if (filteredJobs.isEmpty ||
+        _currentFocusedJobIndex < 0 ||
+        _currentFocusedJobIndex >= filteredJobs.length) {
+      return;
+    }
+
+    _syncJobItemKeys();
+
+    final itemContext = _currentFocusedJobIndex < _jobItemKeys.length
+        ? _jobItemKeys[_currentFocusedJobIndex].currentContext
+        : null;
+
+    if (itemContext != null) {
+      await Scrollable.ensureVisible(
+        itemContext,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.42,
+      );
+      return;
+    }
+
+    if (!_homeScrollController.hasClients) return;
+
+    const headerOffset = 520.0;
+    const estimatedItemHeight = 190.0;
+    final viewportHeight = _homeScrollController.position.viewportDimension;
+    final itemOffset =
+        headerOffset + (_currentFocusedJobIndex * estimatedItemHeight);
+    final centeredOffset =
+        itemOffset - (viewportHeight / 2) + (estimatedItemHeight / 2);
+
+    final safeOffset = centeredOffset.clamp(
+      0.0,
+      _homeScrollController.position.maxScrollExtent,
+    );
+
+    await _homeScrollController.animateTo(
+      safeOffset,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _setupHomeGestureFeedbackListener() {
+    _gestureNavigationController.onActionResult((result) {
+      if (!mounted || _selectedIndex != 0) return;
+
+      final message = result.message?.trim();
+
+      if (message == null || message.isEmpty) return;
+
+      final lowerMessage = message.toLowerCase();
+
+      final isControllerFeedback = lowerMessage.contains('cooldown') ||
+          lowerMessage.contains('nonaktif') ||
+          lowerMessage.contains('confidence') ||
+          lowerMessage.contains('belum stabil') ||
+          lowerMessage.contains('diproses') ||
+          lowerMessage.contains('tidak dikenali');
+
+      // Feedback sukses seperti "Lanjut berhasil" sudah ditangani langsung
+      // oleh _handleGestureNextJob(), jadi jangan ditampilkan ulang di sini.
+      if (!isControllerFeedback) return;
+
+      final isHighContrast =
+          AccessibilityController.highContrastNotifier.value;
+
+      final bool isWarning = lowerMessage.contains('cooldown') ||
+          lowerMessage.contains('nonaktif') ||
+          lowerMessage.contains('confidence') ||
+          lowerMessage.contains('belum stabil') ||
+          lowerMessage.contains('diproses');
+
+      _showCustomSnackBar(
+        message: message,
+        icon: isWarning
+            ? Icons.hourglass_bottom_rounded
+            : Icons.warning_amber_rounded,
+        backgroundColor: isWarning ? Colors.orange : Colors.red,
+        isHighContrast: isHighContrast,
+      );
+    });
+  }
+
+  void _registerHomeGestureActionsIfNeeded() {
+    if (!mounted || _selectedIndex != 0) return;
+
+    if (!_isGestureNavigationModeOn()) {
+      GestureNavigationGuard.unregisterPageGestures(
+        _gestureNavigationController,
+        owner: this,
+      );
+      return;
+    }
+
+    // Re-register listener karena controller singleton dan callback
+    // onActionResult bisa ditimpa oleh halaman lain.
+    _setupHomeGestureFeedbackListener();
+
+    GestureNavigationGuard.registerPageGestures(
+      controller: _gestureNavigationController,
+      owner: this,
+      screenContext: 'home',
+      scrollController: _homeScrollController,
+      onNext: _handleGestureNextJob,
+      onBack: _handleGestureBackFromHome,
+      onConfirm: _handleGestureOpenFocusedJob,
+    );
+
+    _gestureNavigationController.printStatus();
+  }
+
+  Future<bool> _handleGestureNextJob() async {
+    if (!mounted) return false;
+
+    if (filteredJobs.isEmpty) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan yang tersedia',
+        isError: true,
+      );
+      return false;
+    }
+
+    if (_currentFocusedJobIndex >= filteredJobs.length - 1) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan berikutnya',
+        isError: true,
+      );
+      return false;
+    }
+
+    setState(() {
+      _currentFocusedJobIndex++;
+    });
+
+    await _scrollToFocusedJob();
+
+    if (!mounted) return false;
+
+    final focusedJob = Map<String, dynamic>.from(
+      filteredJobs[_currentFocusedJobIndex] as Map,
+    );
+
+    _showGesturePageFeedback(
+      _selectedJobMessage(focusedJob),
+    );
+
+    return true;
+  }
+
+  Future<bool> _handleGestureOpenFocusedJob() async {
+    if (!mounted) return false;
+
+    if (filteredJobs.isEmpty ||
+        _currentFocusedJobIndex < 0 ||
+        _currentFocusedJobIndex >= filteredJobs.length) {
+      _showGesturePageFeedback(
+        'Tidak ada lowongan yang sedang dipilih',
+        isError: true,
+      );
+      return false;
+    }
+
+    final jobMap = Map<String, dynamic>.from(
+      filteredJobs[_currentFocusedJobIndex] as Map,
+    );
+
+    _showGesturePageFeedback('Membuka: ${_getJobTitle(jobMap)}');
+
+    // Jangan await Navigator.push di dalam callback gesture.
+    // Kalau di-await, GestureNavigationController akan tetap berada dalam state
+    // "executing" selama JobDetailPage terbuka. Akibatnya gesture di halaman
+    // detail tidak langsung aktif ketika detail dibuka lewat Thumbs Up.
+    Future.microtask(() {
+      if (!mounted) return;
+      _openJobDetailWithGestureReRegister(jobMap);
+    });
+
+    return true;
+  }
+
+  Future<bool> _handleGestureBackFromHome() async {
+    if (!mounted) return false;
+
+    if (_selectedIndex != 0) {
+      setState(() {
+        _selectedIndex = 0;
+      });
+      _registerHomeGestureActionsIfNeeded();
+      return true;
+    }
+
+    final popped = await Navigator.maybePop(context);
+
+    if (!popped && mounted) {
+      _showGesturePageFeedback(
+        'Sudah di halaman utama',
+        isError: true,
+      );
+    }
+
+    return popped;
+  }
+
+  Future<void> _openJobDetailWithGestureReRegister(
+    Map<String, dynamic> jobMap,
+  ) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => JobDetailPage(
+          job: jobMap,
+          currentUser: widget.userData,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerHomeGestureActionsIfNeeded();
+      _setupHomeGestureCameraIfNeeded();
+    });
+  }
+
+  void _showGesturePageFeedback(
+    String message, {
+    bool isError = false,
+  }) {
+    if (!mounted) return;
+
+    _showCustomSnackBar(
+      message: message,
+      icon: isError ? Icons.warning_amber_rounded : Icons.check_circle_rounded,
+      backgroundColor: isError ? Colors.orange : const Color(0xFF16A34A),
+      isHighContrast: AccessibilityController.highContrastNotifier.value,
+    );
   }
 
   Future<void> _openNotificationPage() async {
@@ -473,14 +916,43 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _selectedIndex == 0 ? _buildBerandaAppBar() : _buildOtherAppBar(),
-      body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: KeyedSubtree(
-            key: ValueKey<int>(_selectedIndex),
-            child: pages[_selectedIndex],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: KeyedSubtree(
+                key: ValueKey<int>(_selectedIndex),
+                child: pages[_selectedIndex],
+              ),
+            ),
           ),
-        ),
+          if (_selectedIndex == 0)
+            ValueListenableBuilder<bool>(
+              valueListenable:
+                  AccessibilityController.gestureNavigationModeNotifier,
+              builder: (context, isGestureModeOn, _) {
+                if (!isGestureModeOn) {
+                  return const SizedBox.shrink();
+                }
+
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _setupHomeGestureCameraIfNeeded();
+                });
+
+                return const Positioned(
+                  right: 16,
+                  bottom: 92,
+                  child: IgnorePointer(
+                    child: MiniCameraPreview(
+                      width: 78,
+                      height: 104,
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -503,9 +975,8 @@ class _HomePageState extends State<HomePage> {
                 : AppColors.primaryNavy,
             elevation: 0,
             type: BottomNavigationBarType.fixed,
-            selectedItemColor: theme.brightness == Brightness.dark
-                ? Colors.black
-                : Colors.white,
+            selectedItemColor:
+                theme.brightness == Brightness.dark ? Colors.black : Colors.white,
             unselectedItemColor: theme.brightness == Brightness.dark
                 ? Colors.black.withOpacity(0.6)
                 : Colors.white70,
@@ -655,13 +1126,147 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildAccessibilityGestureModeRow() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: AccessibilityController.highContrastNotifier,
+      builder: (context, isHighContrast, _) {
+        return Row(
+          children: [
+            Expanded(
+              child: _buildCompactModeToggleCard(
+                icon: Icons.visibility_rounded,
+                title: 'Kontras Tinggi',
+                value: isHighContrast,
+                isHighContrast: isHighContrast,
+                onChanged: (value) {
+                  AccessibilityController.setHighContrast(value);
+
+                  _showCustomSnackBar(
+                    message: value
+                        ? 'Mode Kontras Tinggi Diaktifkan'
+                        : 'Mode Kontras Tinggi Dimatikan',
+                    icon: value ? Icons.visibility : Icons.visibility_off,
+                    backgroundColor:
+                        value ? Colors.black : Colors.grey.shade800,
+                    isHighContrast: value,
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ValueListenableBuilder<bool>(
+                valueListenable:
+                    AccessibilityController.gestureNavigationModeNotifier,
+                builder: (context, isGestureModeOn, __) {
+                  return _buildCompactModeToggleCard(
+                    icon: Icons.front_hand_rounded,
+                    title: 'Gesture Mode',
+                    value: isGestureModeOn,
+                    isHighContrast: isHighContrast,
+                    isLoading: _isUpdatingGestureMode,
+                    onChanged: _setGestureModeFromHome,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCompactModeToggleCard({
+    required IconData icon,
+    required String title,
+    required bool value,
+    required bool isHighContrast,
+    required ValueChanged<bool> onChanged,
+    bool isLoading = false,
+  }) {
+    final mainColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+
+    final backgroundColor = isHighContrast
+        ? AccessibilityTheme.darkCard
+        : AppColors.primaryNavy.withOpacity(0.05);
+
+    final borderColor = isHighContrast
+        ? AccessibilityTheme.yellow
+        : AppColors.primaryNavy.withOpacity(0.10);
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 64),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: borderColor,
+          width: isHighContrast ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: mainColor,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.bold,
+                height: 1.15,
+                color: mainColor,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          if (isLoading)
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                color: mainColor,
+              ),
+            )
+          else
+            Transform.scale(
+              scale: 0.78,
+              child: Switch(
+                value: value,
+                activeThumbColor:
+                    isHighContrast ? AccessibilityTheme.yellow : mainColor,
+                activeTrackColor: isHighContrast
+                    ? AccessibilityTheme.yellow.withOpacity(0.35)
+                    : AppColors.primaryNavy.withOpacity(0.30),
+                onChanged: onChanged,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBeranda(BuildContext context) {
     final theme = Theme.of(context);
+    _syncJobItemKeys();
 
     return RefreshIndicator(
       color: theme.colorScheme.primary,
-      onRefresh: fetchJobs,
+      onRefresh: forceFreshFetch,
       child: SingleChildScrollView(
+        controller: _homeScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -711,81 +1316,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            ValueListenableBuilder<bool>(
-              valueListenable: AccessibilityController.highContrastNotifier,
-              builder: (context, isHighContrast, _) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isHighContrast
-                        ? Colors.black
-                        : AppColors.primaryNavy.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: isHighContrast
-                        ? Border.all(
-                            color: Colors.yellow,
-                            width: 2,
-                          )
-                        : null,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.visibility,
-                              size: 20,
-                              color: isHighContrast
-                                  ? Colors.yellow
-                                  : AppColors.primaryNavy,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Mode Kontras Tinggi',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isHighContrast
-                                      ? Colors.yellow
-                                      : AppColors.primaryNavy,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: isHighContrast,
-                        activeThumbColor: Colors.yellow,
-                        activeTrackColor: Colors.grey.shade800,
-                        onChanged: (value) {
-                          AccessibilityController.setHighContrast(value);
-                          _showCustomSnackBar(
-                            message: value
-                                ? 'Mode Kontras Tinggi Diaktifkan'
-                                : 'Mode Kontras Tinggi Dimatikan',
-                            icon: value
-                                ? Icons.visibility
-                                : Icons.visibility_off,
-                            backgroundColor:
-                                value ? Colors.black : Colors.grey.shade800,
-                            isHighContrast: value,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            _buildAccessibilityGestureModeRow(),
             const SizedBox(height: 24),
             Row(
               children: [
@@ -878,28 +1409,88 @@ class _HomePageState extends State<HomePage> {
                 ),
               )
             else
-              ...filteredJobs.map(
-                (job) {
-                  final jobMap = job as Map<String, dynamic>;
+              ...filteredJobs.asMap().entries.map(
+                (entry) {
+                  final index = entry.key;
+                  final jobMap = entry.value as Map<String, dynamic>;
+                  final isFocused = index == _currentFocusedJobIndex;
+
                   return ValueListenableBuilder<bool>(
-                    valueListenable: AccessibilityController.highContrastNotifier,
+                    valueListenable:
+                        AccessibilityController.highContrastNotifier,
                     builder: (context, isHighContrast, _) {
-                      return _JobCard(
-                        job: jobMap,
-                        isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
-                        isHighContrast: isHighContrast,
-                        onDetail: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => JobDetailPage(
-                                job: jobMap,
-                                currentUser: widget.userData,
-                              ),
+                      return AnimatedContainer(
+                        key: index < _jobItemKeys.length
+                            ? _jobItemKeys[index]
+                            : null,
+                        duration: const Duration(milliseconds: 220),
+                        margin: EdgeInsets.only(bottom: isFocused ? 10 : 0),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          border: isFocused
+                              ? Border.all(
+                                  color: isHighContrast
+                                      ? AccessibilityTheme.yellow
+                                      : AppColors.primaryNavy,
+                                  width: 2,
+                                )
+                              : null,
+                          boxShadow: isFocused && !isHighContrast
+                              ? [
+                                  BoxShadow(
+                                    color:
+                                        AppColors.primaryNavy.withOpacity(0.12),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            _JobCard(
+                              job: jobMap,
+                              isSaved: savedJobIds.contains(_jobIdOf(jobMap)),
+                              isHighContrast: isHighContrast,
+                              onDetail: () {
+                                setState(() {
+                                  _currentFocusedJobIndex = index;
+                                });
+                                _openJobDetailWithGestureReRegister(jobMap);
+                              },
+                              onSave: () =>
+                                  toggleSaveJob(jobMap, isHighContrast),
                             ),
-                          );
-                        },
-                        onSave: () => toggleSaveJob(jobMap, isHighContrast),
+                            if (isFocused)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isHighContrast
+                                        ? AccessibilityTheme.yellow
+                                        : AppColors.primaryNavy,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    'Dipilih',
+                                    style: TextStyle(
+                                      color: isHighContrast
+                                          ? AccessibilityTheme.black
+                                          : Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       );
                     },
                   );
@@ -977,14 +1568,88 @@ class _JobCard extends StatelessWidget {
     this.onSave,
   });
 
+  Widget _buildJobPhoto(dynamic photo) {
+    final photoText = photo?.toString().trim() ?? '';
+
+    Widget placeholder() {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: isHighContrast
+              ? Colors.yellow.withOpacity(0.3)
+              : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          Icons.business,
+          color: isHighContrast
+              ? AccessibilityTheme.yellow
+              : Colors.grey.shade400,
+        ),
+      );
+    }
+
+    if (photoText.isEmpty) {
+      return placeholder();
+    }
+
+    // Untuk data stress test: job_photo berupa URL https://picsum.photos/...
+    if (photoText.startsWith('http://') || photoText.startsWith('https://')) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          photoText,
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    }
+
+    // Untuk data lama/asli: job_photo berupa base64
+    try {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          base64Decode(photoText),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
+        ),
+      );
+    } catch (e) {
+      return placeholder();
+    }
+  }
+
+  String _getJobTitle() {
+    return job['title']?.toString() ??
+        job['job_title']?.toString() ??
+        'Tanpa Judul';
+  }
+
+  String _getJobType() {
+    return job['job_type']?.toString() ??
+        job['type']?.toString() ??
+        'Tipe tidak diketahui';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cardColor = isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
-    final textColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final cardColor =
+        isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
+    final textColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
     final subTextColor = isHighContrast ? Colors.white70 : Colors.black54;
-    final buttonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-    final buttonTextColor = isHighContrast ? AccessibilityTheme.black : Colors.white;
-    final outlineButtonColor = isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+    final buttonTextColor =
+        isHighContrast ? AccessibilityTheme.black : Colors.white;
+    final outlineButtonColor =
+        isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -993,7 +1658,9 @@ class _JobCard extends StatelessWidget {
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighContrast ? outlineButtonColor.withOpacity(0.5) : Colors.grey.withOpacity(0.1),
+          color: isHighContrast
+              ? outlineButtonColor.withOpacity(0.5)
+              : Colors.grey.withOpacity(0.1),
         ),
         boxShadow: [
           if (!isHighContrast)
@@ -1009,40 +1676,14 @@ class _JobCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              if (job['job_photo'] != null &&
-                  job['job_photo'].toString().isNotEmpty)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    base64Decode(job['job_photo']),
-                    width: 48,
-                    height: 48,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const Icon(Icons.business),
-                  ),
-                ),
-              if (job['job_photo'] == null ||
-                  job['job_photo'].toString().isEmpty)
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: isHighContrast ? Colors.yellow.withOpacity(0.3) : Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.business,
-                    color: isHighContrast ? AccessibilityTheme.yellow : Colors.grey.shade400,
-                  ),
-                ),
+              _buildJobPhoto(job['job_photo']),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      job['title'] ?? 'Tanpa Judul',
+                      _getJobTitle(),
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -1067,16 +1708,24 @@ class _JobCard extends StatelessWidget {
             children: [
               Icon(Icons.location_on, color: subTextColor, size: 16),
               const SizedBox(width: 4),
-              Text(
-                job['location'] ?? 'Lokasi tidak diketahui',
-                style: TextStyle(color: subTextColor),
+              Expanded(
+                child: Text(
+                  job['location'] ?? 'Lokasi tidak diketahui',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: subTextColor),
+                ),
               ),
               const SizedBox(width: 16),
               Icon(Icons.work, color: subTextColor, size: 16),
               const SizedBox(width: 4),
-              Text(
-                job['job_type'] ?? 'Tipe tidak diketahui',
-                style: TextStyle(color: subTextColor),
+              Expanded(
+                child: Text(
+                  _getJobType(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: subTextColor),
+                ),
               ),
             ],
           ),
@@ -1109,7 +1758,7 @@ class _JobCard extends StatelessWidget {
                   onPressed: onSave,
                   icon: Icon(
                     isSaved ? Icons.bookmark : Icons.bookmark_border,
-                    color: isSaved ? buttonTextColor : buttonTextColor,
+                    color: buttonTextColor,
                   ),
                   label: Text(isSaved ? 'Tersimpan' : 'Simpan'),
                   style: ElevatedButton.styleFrom(

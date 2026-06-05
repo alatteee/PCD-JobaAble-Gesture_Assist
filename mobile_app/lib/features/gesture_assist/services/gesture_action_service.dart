@@ -1,9 +1,34 @@
 import 'package:flutter/material.dart';
+
 import '../models/gesture_action_model.dart';
 
-/// Service untuk execute gesture actions dengan aman
+class GestureActionRegistration {
+  final Object owner;
+  final String screenContext;
+  final GestureConfirmCallback? onConfirm;
+  final GestureNextCallback? onNext;
+  final GestureBackCallback? onBack;
+  final ScrollController? scrollController;
+
+  const GestureActionRegistration({
+    required this.owner,
+    required this.screenContext,
+    this.onConfirm,
+    this.onNext,
+    this.onBack,
+    this.scrollController,
+  });
+}
+
+/// Service untuk execute gesture actions dengan aman.
+///
+/// Dibuat stack-based supaya callback halaman sebelumnya tidak ikut hilang
+/// ketika halaman child dispose. Contoh:
+/// Home -> JobDetail -> ApplyJob.
+/// Saat ApplyJob dispose, callback JobDetail/Home tidak ikut di-clear global.
 class GestureActionService {
-  static final GestureActionService _instance = GestureActionService._internal();
+  static final GestureActionService _instance =
+      GestureActionService._internal();
 
   factory GestureActionService() {
     return _instance;
@@ -11,188 +36,273 @@ class GestureActionService {
 
   GestureActionService._internal();
 
-  // Callback yang bisa didaftarkan oleh halaman
-  GestureConfirmCallback? _onConfirm;
-  GestureNextCallback? _onNext;
-  GestureBackCallback? _onBack;
+  final List<GestureActionRegistration> _registrationStack =
+      <GestureActionRegistration>[];
 
-  ScrollController? _scrollController;
-
-  // Constants
   static const double scrollOffset = 300.0;
-  static const double scrollDuration = 500; // milliseconds
+  static const int scrollDurationMs = 500;
 
-  /// Register callback untuk CONFIRM action
+  GestureActionRegistration? get _activeRegistration {
+    if (_registrationStack.isEmpty) return null;
+    return _registrationStack.last;
+  }
+
+  String get activeScreenContext =>
+      _activeRegistration?.screenContext ?? 'unknown';
+
+  void registerPageActions({
+    required Object owner,
+    required String screenContext,
+    GestureConfirmCallback? onConfirm,
+    GestureNextCallback? onNext,
+    GestureBackCallback? onBack,
+    ScrollController? scrollController,
+  }) {
+    // Hapus registrasi lama dari owner yang sama untuk menghindari duplikat
+    unregisterOwner(owner);
+
+    _registrationStack.add(
+      GestureActionRegistration(
+        owner: owner,
+        screenContext: screenContext,
+        onConfirm: onConfirm,
+        onNext: onNext,
+        onBack: onBack,
+        scrollController: scrollController,
+      ),
+    );
+
+    debugPrint(
+      '[GestureActionService] Registered $screenContext, stack=${_registrationStack.length}',
+    );
+    printRegisteredCallbacks();
+  }
+
+  void unregisterOwner(Object owner) {
+    final initialLength = _registrationStack.length;
+    _registrationStack.removeWhere((item) => identical(item.owner, owner));
+    if (_registrationStack.length < initialLength) {
+      debugPrint(
+        '[GestureActionService] Unregistered owner, stack=${_registrationStack.length}',
+      );
+    }
+  }
+
+  /// Compatibility helper untuk kode lama.
+  /// Jika masih ada yang memanggil registerConfirmAction/registerNextAction
+  /// langsung, action tetap masuk ke stack dengan owner service ini.
   void onConfirmAction(GestureConfirmCallback callback) {
-    _onConfirm = callback;
+    registerPageActions(
+      owner: this,
+      screenContext: activeScreenContext,
+      onConfirm: callback,
+      onNext: _activeRegistration?.onNext,
+      onBack: _activeRegistration?.onBack,
+      scrollController: _activeRegistration?.scrollController,
+    );
   }
 
-  /// Register callback untuk NEXT action
   void onNextAction(GestureNextCallback callback) {
-    _onNext = callback;
+    registerPageActions(
+      owner: this,
+      screenContext: activeScreenContext,
+      onConfirm: _activeRegistration?.onConfirm,
+      onNext: callback,
+      onBack: _activeRegistration?.onBack,
+      scrollController: _activeRegistration?.scrollController,
+    );
   }
 
-  /// Register callback untuk BACK action
   void onBackAction(GestureBackCallback callback) {
-    _onBack = callback;
+    registerPageActions(
+      owner: this,
+      screenContext: activeScreenContext,
+      onConfirm: _activeRegistration?.onConfirm,
+      onNext: _activeRegistration?.onNext,
+      onBack: callback,
+      scrollController: _activeRegistration?.scrollController,
+    );
   }
 
-  /// Register scroll controller untuk NEXT action (scroll down)
   void setScrollController(ScrollController controller) {
-    _scrollController = controller;
+    registerPageActions(
+      owner: this,
+      screenContext: activeScreenContext,
+      onConfirm: _activeRegistration?.onConfirm,
+      onNext: _activeRegistration?.onNext,
+      onBack: _activeRegistration?.onBack,
+      scrollController: controller,
+    );
   }
 
-  /// Clear semua callbacks dan controllers
   void clearCallbacks() {
-    _onConfirm = null;
-    _onNext = null;
-    _onBack = null;
-    _scrollController = null;
+    _registrationStack.clear();
+    debugPrint('[GestureActionService] Cleared all callbacks');
   }
 
-  /// Execute CONFIRM action (Thumbs Up)
-  /// Panggil callback confirmAction jika ada
   Future<GestureActionResult> executeConfirm() async {
     try {
-      if (_onConfirm == null) {
+      final registration = _activeRegistration;
+      final callback = registration?.onConfirm;
+
+      if (callback == null) {
         return GestureActionResult(
           type: GestureActionType.confirm,
           status: ActionStatus.skipped,
-          message: 'Tidak ada confirm action terdaftar untuk halaman ini',
+          message: 'Tidak ada aksi confirm pada halaman ini',
         );
       }
 
-      final success = await _onConfirm!();
+      final success = await callback();
 
       return GestureActionResult(
         type: GestureActionType.confirm,
         status: success ? ActionStatus.success : ActionStatus.failed,
-        message: success ? '✅ Konfirmasi berhasil' : '❌ Konfirmasi gagal',
+        message: success ? 'Konfirmasi berhasil' : 'Konfirmasi gagal',
       );
     } catch (e) {
       return GestureActionResult(
         type: GestureActionType.confirm,
         status: ActionStatus.failed,
-        message: 'Error: ${e.toString()}',
+        message: 'Error confirm action: $e',
       );
     }
   }
 
-  /// Execute NEXT action (Open Palm)
-  /// Scroll ke bawah jika ada ScrollController, atau panggil callback
   Future<GestureActionResult> executeNext() async {
     try {
-      // Prioritas 1: Gunakan callback jika ada
-      if (_onNext != null) {
-        final success = await _onNext!();
+      final registration = _activeRegistration;
+      final callback = registration?.onNext;
+
+      if (callback != null) {
+        final success = await callback();
+
         return GestureActionResult(
           type: GestureActionType.next,
           status: success ? ActionStatus.success : ActionStatus.failed,
-          message: success ? '👉 Lanjut berhasil' : '❌ Lanjut gagal',
+          message: success ? 'Lanjut berhasil' : 'Lanjut gagal',
         );
       }
 
-      // Prioritas 2: Scroll ke bawah jika ada ScrollController
-      if (_scrollController != null && _scrollController!.hasClients) {
-        final currentOffset = _scrollController!.offset;
-        final maxOffset = _scrollController!.position.maxScrollExtent;
+      final scrollController = registration?.scrollController;
+
+      if (scrollController != null && scrollController.hasClients) {
+        final currentOffset = scrollController.offset;
+        final maxOffset = scrollController.position.maxScrollExtent;
+
+        if (currentOffset >= maxOffset) {
+          return GestureActionResult(
+            type: GestureActionType.next,
+            status: ActionStatus.skipped,
+            message: 'Sudah berada di bagian paling bawah',
+          );
+        }
+
         final nextOffset =
             (currentOffset + scrollOffset).clamp(0.0, maxOffset);
 
-        await _scrollController!.animateTo(
+        await scrollController.animateTo(
           nextOffset,
-          duration: Duration(milliseconds: scrollDuration.toInt()),
+          duration: const Duration(milliseconds: scrollDurationMs),
           curve: Curves.easeInOut,
         );
 
         return GestureActionResult(
           type: GestureActionType.next,
           status: ActionStatus.success,
-          message: '👉 Scroll ke bawah',
+          message: 'Scroll ke bawah',
           data: {'offset': nextOffset},
         );
       }
 
-      // Tidak ada aksi yang bisa dilakukan
       return GestureActionResult(
         type: GestureActionType.next,
         status: ActionStatus.skipped,
-        message: 'Tidak ada next action terdaftar',
+        message: 'Tidak ada aksi next pada halaman ini',
       );
     } catch (e) {
       return GestureActionResult(
         type: GestureActionType.next,
         status: ActionStatus.failed,
-        message: 'Error: ${e.toString()}',
+        message: 'Error next action: $e',
       );
     }
   }
 
-  /// Execute BACK action (Fist)
-  /// Gunakan Navigator.maybePop() jika ada context
-  /// Atau panggil callback jika ada
   Future<GestureActionResult> executeBack(BuildContext? context) async {
     try {
-      // Prioritas 1: Gunakan callback jika ada
-      if (_onBack != null) {
-        final success = await _onBack!();
+      final registration = _activeRegistration;
+      final callback = registration?.onBack;
+
+      if (callback != null) {
+        final success = await callback();
+
         return GestureActionResult(
           type: GestureActionType.back,
           status: success ? ActionStatus.success : ActionStatus.failed,
-          message: success ? '👈 Kembali berhasil' : '❌ Kembali gagal',
+          message: success ? 'Kembali berhasil' : 'Kembali gagal',
         );
       }
 
-      // Prioritas 2: Gunakan Navigator.maybePop() jika ada context
       if (context != null) {
         final popped = await Navigator.maybePop(context);
+
         return GestureActionResult(
           type: GestureActionType.back,
           status: popped ? ActionStatus.success : ActionStatus.skipped,
           message: popped
-              ? '👈 Kembali'
-              : '⏸️ Sudah di halaman pertama (tidak bisa kembali)',
+              ? 'Kembali'
+              : 'Tidak ada halaman sebelumnya untuk kembali',
         );
       }
 
       return GestureActionResult(
         type: GestureActionType.back,
-        status: ActionStatus.failed,
-        message: 'Tidak ada context untuk Navigator.pop',
+        status: ActionStatus.skipped,
+        message: 'Tidak ada aksi back pada halaman ini',
       );
     } catch (e) {
       return GestureActionResult(
         type: GestureActionType.back,
         status: ActionStatus.failed,
-        message: 'Error: ${e.toString()}',
+        message: 'Error back action: $e',
       );
     }
   }
 
-  /// Check apakah action bisa dijalankan
-  bool canExecuteAction(GestureActionType type) {
+  bool canExecuteAction(GestureActionType type, {bool hasContext = false}) {
+    final registration = _activeRegistration;
+
     switch (type) {
       case GestureActionType.confirm:
-        return _onConfirm != null;
+        return registration?.onConfirm != null;
       case GestureActionType.next:
-        return _onNext != null ||
-            (_scrollController != null && _scrollController!.hasClients);
+        return registration?.onNext != null ||
+            (registration?.scrollController != null &&
+                registration!.scrollController!.hasClients);
       case GestureActionType.back:
-        return _onBack != null; // Navigator bisa selalu dipanggil
+        return registration?.onBack != null || hasContext;
       case GestureActionType.unknown:
         return false;
     }
   }
 
-  /// Debug: Print current registered callbacks
   void printRegisteredCallbacks() {
-    print('[GestureActionService] === Registered Callbacks ===');
-    print('[GestureActionService] Confirm: ${_onConfirm != null ? '✅' : '❌'}');
-    print('[GestureActionService] Next: ${_onNext != null ? '✅' : '❌'}');
-    print('[GestureActionService] Back: ${_onBack != null ? '✅' : '❌'}');
-    print(
-      '[GestureActionService] ScrollController: ${_scrollController != null ? '✅' : '❌'}',
+    final registration = _activeRegistration;
+
+    debugPrint('[GestureActionService] === Active Registration ===');
+    debugPrint('[GestureActionService] Stack: ${_registrationStack.length}');
+    debugPrint(
+      '[GestureActionService] Screen: ${registration?.screenContext ?? 'none'}',
     );
-    print('[GestureActionService] ========================');
+    debugPrint(
+      '[GestureActionService] Confirm: ${registration?.onConfirm != null}',
+    );
+    debugPrint('[GestureActionService] Next: ${registration?.onNext != null}');
+    debugPrint('[GestureActionService] Back: ${registration?.onBack != null}');
+    debugPrint(
+      '[GestureActionService] ScrollController: ${registration?.scrollController != null}',
+    );
+    debugPrint('[GestureActionService] ===========================');
   }
 }

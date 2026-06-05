@@ -36,6 +36,7 @@ class GestureStabilityHelper {
   final int bufferSize;
   final int requiredStableFrames;
   final int unknownGraceMs;
+  final int retriggerDelayMs;
 
   final List<GestureResultModel> _buffer = [];
 
@@ -43,11 +44,13 @@ class GestureStabilityHelper {
   DateTime? _lastStableAt;
 
   String? _lastTriggeredGesture;
+  DateTime? _lastTriggeredAt;
 
   GestureStabilityHelper({
     this.bufferSize = 6,
     this.requiredStableFrames = 3,
     this.unknownGraceMs = 500,
+    this.retriggerDelayMs = 1600,
   });
 
   static const Set<String> _validGestures = {
@@ -97,9 +100,16 @@ class GestureStabilityHelper {
       _lastStableResult = stableResult;
       _lastStableAt = DateTime.now();
 
-      final shouldTrigger = _lastTriggeredGesture != winnerGesture;
+      final now = DateTime.now();
+      final isDifferentGesture = _lastTriggeredGesture != winnerGesture;
+      final canRetriggerSameGesture = _lastTriggeredAt == null ||
+          now.difference(_lastTriggeredAt!).inMilliseconds >= retriggerDelayMs;
+
+      final shouldTrigger = isDifferentGesture || canRetriggerSameGesture;
+
       if (shouldTrigger) {
         _lastTriggeredGesture = winnerGesture;
+        _lastTriggeredAt = now;
       }
 
       _printDebug(
@@ -151,6 +161,7 @@ class GestureStabilityHelper {
       _lastStableResult = null;
       _lastStableAt = null;
       _lastTriggeredGesture = null;
+      _lastTriggeredAt = null;
     }
 
     _printDebug(
@@ -232,6 +243,7 @@ class GestureStabilityHelper {
     _lastStableResult = null;
     _lastStableAt = null;
     _lastTriggeredGesture = null;
+    _lastTriggeredAt = null;
   }
 
   String? get lastStableGesture => _lastStableResult?.gestureType;

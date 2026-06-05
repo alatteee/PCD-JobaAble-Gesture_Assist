@@ -106,6 +106,13 @@ class CameraProvider extends ChangeNotifier {
   }
 
   Future<void> initializeCamera() async {
+    if (_isInitialized && _cameraService.controller != null) {
+      startGestureStream();
+      return;
+    }
+
+    if (_isLoading) return;
+
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -117,6 +124,11 @@ class CameraProvider extends ChangeNotifier {
       _detectionService.initializeRealDetector();
 
       _isInitialized = true;
+
+      // Stream hanya dimulai ketika halaman pemanggil memang mengaktifkan
+      // Gesture Mode. HomePage memanggil method ini hanya saat toggle ON.
+      startGestureStream();
+      debugPrint('✅ Image stream started for gesture detection');
     } catch (e) {
       _errorMessage = e.toString();
       debugPrint('❌ CameraProvider initializeCamera error: $e');
@@ -126,13 +138,56 @@ class CameraProvider extends ChangeNotifier {
     }
   }
 
-  void toggleStream() {
-    if (_cameraService.isStreaming) {
-      _cameraService.stopImageStream();
-    } else {
-      _cameraService.startImageStream(_onImageStream);
-    }
+  void startGestureStream() {
+    if (!_isInitialized || _cameraService.controller == null) return;
+    if (_cameraService.isStreaming) return;
+
+    _cameraService.startImageStream(_onImageStream);
     notifyListeners();
+  }
+
+  Future<void> stopGestureStream() async {
+    if (!_cameraService.isStreaming) return;
+
+    try {
+      await _cameraService.stopImageStream();
+    } catch (e) {
+      debugPrint('❌ CameraProvider stopGestureStream error: $e');
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> stopGestureCamera() async {
+    if (!_isInitialized &&
+        !_isLoading &&
+        !_cameraService.isStreaming &&
+        _cameraService.controller == null) {
+      return;
+    }
+
+    _isLoading = false;
+
+    try {
+      await _cameraService.dispose();
+      _detectionService.dispose();
+    } catch (e) {
+      debugPrint('❌ CameraProvider stopGestureCamera error: $e');
+    } finally {
+      _isInitialized = false;
+      _landmarks = [];
+      _detectedGesture = null;
+      _lastAction = null;
+      notifyListeners();
+    }
+  }
+
+  Future<void> toggleStream() async {
+    if (_cameraService.isStreaming) {
+      await stopGestureStream();
+    } else {
+      startGestureStream();
+    }
   }
 
   @override
