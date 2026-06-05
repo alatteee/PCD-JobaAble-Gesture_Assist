@@ -54,18 +54,15 @@ class GestureNavigationGuard {
     BuildContext context,
     GestureActionResult result,
   ) {
+    // Skip temporary notifications like cooldown, low confidence, or inactive states to prevent SnackBar lag
+    if (result.isNotReady || result.isSkipped) return;
+
     Color color;
     IconData icon;
 
     if (result.isSuccess) {
       color = const Color(0xFF16A34A);
       icon = Icons.check_circle_rounded;
-    } else if (result.isNotReady) {
-      color = Colors.orange;
-      icon = Icons.hourglass_bottom_rounded;
-    } else if (result.isSkipped) {
-      color = Colors.orange;
-      icon = Icons.info_rounded;
     } else {
       color = Colors.red;
       icon = Icons.error_rounded;

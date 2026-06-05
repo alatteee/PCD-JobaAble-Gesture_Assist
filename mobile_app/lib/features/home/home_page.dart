@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
@@ -684,17 +684,16 @@ class _HomePageState extends State<HomePage> {
     _gestureNavigationController.onActionResult((result) {
       if (!mounted || _selectedIndex != 0) return;
 
+      // Skip temporary notifications like cooldown, low confidence, or inactive states to prevent SnackBar lag
+      if (result.isNotReady || result.isSkipped) return;
+
       final message = result.message?.trim();
 
       if (message == null || message.isEmpty) return;
 
       final lowerMessage = message.toLowerCase();
 
-      final isControllerFeedback = lowerMessage.contains('cooldown') ||
-          lowerMessage.contains('nonaktif') ||
-          lowerMessage.contains('confidence') ||
-          lowerMessage.contains('belum stabil') ||
-          lowerMessage.contains('diproses') ||
+      final isControllerFeedback = lowerMessage.contains('nonaktif') ||
           lowerMessage.contains('tidak dikenali');
 
       // Feedback sukses seperti "Lanjut berhasil" sudah ditangani langsung
@@ -704,18 +703,10 @@ class _HomePageState extends State<HomePage> {
       final isHighContrast =
           AccessibilityController.highContrastNotifier.value;
 
-      final bool isWarning = lowerMessage.contains('cooldown') ||
-          lowerMessage.contains('nonaktif') ||
-          lowerMessage.contains('confidence') ||
-          lowerMessage.contains('belum stabil') ||
-          lowerMessage.contains('diproses');
-
       _showCustomSnackBar(
         message: message,
-        icon: isWarning
-            ? Icons.hourglass_bottom_rounded
-            : Icons.warning_amber_rounded,
-        backgroundColor: isWarning ? Colors.orange : Colors.red,
+        icon: Icons.warning_amber_rounded,
+        backgroundColor: Colors.red,
         isHighContrast: isHighContrast,
       );
     });

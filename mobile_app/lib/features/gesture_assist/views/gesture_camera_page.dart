@@ -29,6 +29,9 @@ class _GestureCameraPageState extends State<GestureCameraPage> {
     _navigationController.onActionResult((result) {
       if (!mounted) return;
 
+      // Skip temporary notifications like cooldown, low confidence, or inactive states to prevent SnackBar lag
+      if (result.isNotReady || result.isSkipped) return;
+
       if (result.isSuccess) {
         HapticFeedback.lightImpact();
       } else {
