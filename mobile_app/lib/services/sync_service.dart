@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide State;
 
 import '../features/cv/cv_controller.dart';
@@ -9,93 +11,143 @@ import 'offline_service.dart';
 class SyncService {
   static bool _isSyncing = false;
   static bool? _lastConnectionStatus;
+  static bool _initialized = false;
+  static bool _hasShownOfflineSnackBar = false;
+  static StreamSubscription<bool>? _connectionSubscription;
 
   static void initialize(BuildContext context) {
-    connectivityService.connectionStream.listen((hasConnection) {
-      if (_lastConnectionStatus == hasConnection) return;
-      _lastConnectionStatus = hasConnection;
+    if (_initialized) return;
+    _initialized = true;
 
-      if (hasConnection) {
-        _handleBackOnline(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    _connectionSubscription =
+        connectivityService.connectionStream.listen((hasConnection) async {
+      // Event pertama hanya disimpan sebagai status awal.
+      // Jangan munculkan SnackBar apa pun saat app baru dibuka.
+      if (_lastConnectionStatus == null) {
+        _lastConnectionStatus = hasConnection;
+        return;
+      }
+
+      if (_lastConnectionStatus == hasConnection) return;
+
+      // Kalau terdeteksi offline, cek ulang cepat.
+      // Ini mencegah false offline saat app baru start / jaringan sedang transisi.
+      if (!hasConnection) {
+        await Future.delayed(const Duration(milliseconds: 900));
+
+        final stillOffline = !(await connectivityService.refresh());
+
+        if (!stillOffline) {
+          _lastConnectionStatus = true;
+          return;
+        }
+
+        _lastConnectionStatus = false;
+        _hasShownOfflineSnackBar = true;
+        _handleOffline(messenger);
+        return;
+      }
+
+      _lastConnectionStatus = true;
+
+      // SnackBar online hanya muncul kalau sebelumnya user benar-benar
+      // sudah melihat SnackBar offline.
+      if (_hasShownOfflineSnackBar) {
+        _hasShownOfflineSnackBar = false;
+        _handleBackOnline(messenger);
       } else {
-        _handleOffline(context);
+        // Tetap sync diam-diam tanpa SnackBar.
+        Future.delayed(const Duration(seconds: 3), performSync);
       }
     });
   }
 
-  static void _handleOffline(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.wifi_off, color: Colors.white),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text('Koneksi terputus. Data akan tersimpan offline.'),
-            ),
-          ],
+  static void _handleOffline(ScaffoldMessengerState messenger) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.wifi_off, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Koneksi terputus. Data akan tersimpan offline.'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 4),
         ),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 4),
-      ),
-    );
+      );
   }
 
-  static void _handleBackOnline(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.wifi, color: Colors.white),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text('Koneksi internet tersedia. Mensinkronisasi...'),
-            ),
-          ],
+  static void _handleBackOnline(ScaffoldMessengerState messenger) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.wifi, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('Koneksi internet tersedia. Mensinkronisasi...'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
+      );
 
-    Future.delayed(const Duration(seconds: 5), performSync);
+    Future.delayed(const Duration(seconds: 3), performSync);
   }
 
   static Future<bool> _prepareMongoConnection() async {
-    final hasConnection = await connectivityService.checkConnection();
+    // Pakai status koneksi global dulu, jangan DNS lookup.
+    bool hasConnection = connectivityService.isOnline;
+
+    // Kalau status terakhir offline, coba refresh cepat sekali.
+    if (!hasConnection) {
+      hasConnection = await connectivityService.refresh();
+    }
+
     if (!hasConnection) {
       print('📴 Sync cancelled: no internet connection.');
       return false;
     }
 
-    final stableInternet = await MongoService.hasStableInternet(retries: 8);
-    if (!stableInternet) {
-      print('📴 Sync cancelled: internet/DNS is not stable yet. Queue kept.');
-      return false;
-    }
+    // Untuk sync, kita memang butuh koneksi Mongo yang benar-benar live.
+    // Maka verifyLive dibuat true, tapi hanya di proses sync, bukan setiap query halaman.
+    bool isLive = await MongoService.ensureConnected(verifyLive: true);
 
-    bool isLive = await MongoService.ensureConnected();
     if (isLive) return true;
-
-    for (int i = 0; i < 10; i++) {
-      await Future.delayed(const Duration(seconds: 1));
-
-      isLive = await MongoService.ensureConnected();
-      if (isLive) return true;
-
-      print('⏳ Ensure/verify attempt ${i + 1}/10 failed. Retrying...');
-    }
-
-    print('🔁 Verify failed after retries. Forcing MongoDB reconnect...');
-    await MongoService.forceReconnect();
 
     for (int i = 0; i < 5; i++) {
       await Future.delayed(const Duration(seconds: 1));
 
-      isLive = await MongoService.verifyConnected();
+      isLive = await MongoService.ensureConnected(verifyLive: true);
+
       if (isLive) return true;
 
-      print('⏳ Post-reconnect verify attempt ${i + 1}/5 failed. Retrying...');
+      print('⏳ Ensure/verify attempt ${i + 1}/5 failed. Retrying...');
+    }
+
+    print('🔁 Verify failed after retries. Forcing MongoDB reconnect...');
+
+    await MongoService.forceReconnect();
+
+    for (int i = 0; i < 3; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+
+      isLive = await MongoService.verifyConnected(force: true);
+
+      if (isLive) return true;
+
+      print('⏳ Post-reconnect verify attempt ${i + 1}/3 failed. Retrying...');
     }
 
     return false;
@@ -125,7 +177,9 @@ class SyncService {
         return;
       }
 
-      print('✅ MongoService VERIFIED LIVE. Processing ${queue.length} item(s)...');
+      print(
+        '✅ MongoService VERIFIED LIVE. Processing ${queue.length} item(s)...',
+      );
 
       for (final item in queue) {
         final action = item['action']?.toString() ?? '';

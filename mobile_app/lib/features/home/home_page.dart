@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../core/constants/app_colors.dart';
@@ -42,8 +42,11 @@ class _HomePageState extends State<HomePage> {
 
   bool isLoading = true;
   bool isLoadingProfileName = true;
+  bool isRefreshingJobs = false;
   bool _isOpeningNotificationPage = false;
   bool _isUpdatingGestureMode = false;
+
+  Future<int>? _unreadNotificationCountFuture;
 
   CameraProvider? _cameraProvider;
 
@@ -80,6 +83,7 @@ class _HomePageState extends State<HomePage> {
       });
     }
 
+    _refreshUnreadNotificationCount();
     fetchProfileName();
     fetchJobs();
 
@@ -115,6 +119,17 @@ class _HomePageState extends State<HomePage> {
         '';
   }
 
+  void _refreshUnreadNotificationCount() {
+    final userId = _currentUserId;
+
+    _unreadNotificationCountFuture = userId.isEmpty
+        ? Future<int>.value(0)
+        : MongoService.getUnreadNotificationCount(
+            receiverId: userId,
+            receiverRole: 'job_seeker',
+          );
+  }
+
   String? _textOrNull(dynamic value) {
     final text = value?.toString().trim();
 
@@ -146,17 +161,47 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    final userIdText = userId.toString();
+
+    // STEP 1: tampilkan cache lokal dulu agar greeting tidak menunggu MongoDB.
+    final cachedProfile = OfflineService.getCachedUserProfile(userIdText);
+
+    if (cachedProfile != null) {
+      namaLengkap = _textOrNull(cachedProfile['nama_lengkap']) ??
+          _textOrNull(cachedProfile['full_name']);
+
+      if (mounted) {
+        setState(() {
+          isLoadingProfileName = false;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          isLoadingProfileName = true;
+        });
+      }
+    }
+
+    // STEP 2: ambil data fresh di background.
     try {
       final profile = await ProfileController.getProfileByUserId(userId);
+
+      if (profile != null) {
+        await OfflineService.cacheUserProfile(userIdText, profile);
+      }
 
       if (!mounted) return;
 
       setState(() {
         namaLengkap = _textOrNull(profile?['nama_lengkap']) ??
-            _textOrNull(profile?['full_name']);
+            _textOrNull(profile?['full_name']) ??
+            namaLengkap;
         isLoadingProfileName = false;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('fetchProfileName fallback cache: $e');
+
       if (!mounted) return;
 
       setState(() {
@@ -169,51 +214,98 @@ class _HomePageState extends State<HomePage> {
     return MongoService.getMongoId(job['_id']);
   }
 
-  Future<void> fetchJobs() async {
+  Future<void> fetchJobs({bool forceRefresh = false}) async {
+    final cachedJobs = OfflineService.getCachedJobs();
+
+    // STEP 1: render cache lokal dulu.
+    if (!forceRefresh && cachedJobs.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          jobs = cachedJobs;
+          isLoading = false;
+        });
+      }
+
+      applyFilters();
+    } else {
+      if (mounted) {
+        setState(() {
+          isLoading = jobs.isEmpty;
+        });
+      }
+    }
+
+    // STEP 2: fetch fresh dari MongoDB di background.
     if (mounted) {
       setState(() {
-        isLoading = true;
+        isRefreshingJobs = true;
       });
     }
 
-    final data = await MongoService.getJobVacancies();
-    final savedIds = await MongoService.getSavedJobIds(
-      userId: _currentUserId,
-    );
+    try {
+      final results = await Future.wait<dynamic>([
+        MongoService.getJobVacancies(),
+        _currentUserId.isEmpty
+            ? Future<Set<String>>.value(<String>{})
+            : MongoService.getSavedJobIds(userId: _currentUserId),
+      ]);
 
-    if (!mounted) return;
+      final freshJobs = (results[0] as List)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
 
-    setState(() {
-      jobs = data;
-      savedJobIds = savedIds;
-      isLoading = false;
-    });
+      final freshSavedIds = results[1] is Set<String>
+          ? results[1] as Set<String>
+          : <String>{};
 
-    applyFilters();
+      if (!mounted) return;
+
+      setState(() {
+        jobs = freshJobs;
+        savedJobIds = freshSavedIds;
+        isLoading = false;
+        isRefreshingJobs = false;
+      });
+
+      applyFilters();
+    } catch (e) {
+      debugPrint('fetchJobs fallback cache: $e');
+
+      if (!mounted) return;
+
+      if (jobs.isEmpty && cachedJobs.isNotEmpty) {
+        setState(() {
+          jobs = cachedJobs;
+        });
+
+        applyFilters();
+      }
+
+      setState(() {
+        isLoading = false;
+        isRefreshingJobs = false;
+      });
+    }
   }
 
-  /// Force refresh jobs dari MongoDB (clear cache dan fetch fresh)
+  /// Force refresh jobs dari MongoDB tanpa menghapus cache lama dulu.
+  /// Ini lebih aman karena kalau MongoDB gagal, data lama tetap tampil.
   Future<void> forceFreshFetch() async {
     if (mounted) {
       setState(() {
-        isLoading = true;
+        isRefreshingJobs = true;
       });
     }
 
-    // DEBUG: Check cache sebelum dihapus
-    print('🔍 DEBUG: Checking cache before clear...');
+    print('🔄 Refreshing jobs from MongoDB...');
     OfflineService.debugCachedJobsCount();
 
-    // Hapus cache lama
-    print('🗑️ Clearing cache to force fresh fetch from MongoDB...');
-    await OfflineService.clearJobsCache();
-
-    // Fetch ulang dari MongoDB
-    await fetchJobs();
+    await fetchJobs(forceRefresh: true);
 
     if (mounted) {
       _showCustomSnackBar(
-        message: 'Data diperbarui dari server',
+        message: 'Data diperbarui',
         icon: Icons.refresh,
         backgroundColor: Colors.grey.shade800,
         isHighContrast: AccessibilityController.highContrastNotifier.value,
@@ -386,10 +478,12 @@ class _HomePageState extends State<HomePage> {
           builder: (context, isHighContrast, _) {
             final bgColor =
                 isHighContrast ? AccessibilityTheme.darkCard : Colors.white;
-            final textColor =
-                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
-            final buttonBgColor =
-                isHighContrast ? AccessibilityTheme.yellow : AppColors.primaryNavy;
+            final textColor = isHighContrast
+                ? AccessibilityTheme.yellow
+                : AppColors.primaryNavy;
+            final buttonBgColor = isHighContrast
+                ? AccessibilityTheme.yellow
+                : AppColors.primaryNavy;
             final buttonTextColor =
                 isHighContrast ? AccessibilityTheme.black : Colors.white;
 
@@ -889,6 +983,7 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         _isOpeningNotificationPage = false;
+        _refreshUnreadNotificationCount();
       });
     }
   }
@@ -1033,10 +1128,7 @@ class _HomePageState extends State<HomePage> {
       actions: [
         if (userId.isNotEmpty)
           FutureBuilder<int>(
-            future: MongoService.getUnreadNotificationCount(
-              receiverId: userId,
-              receiverRole: 'job_seeker',
-            ),
+            future: _unreadNotificationCountFuture ?? Future<int>.value(0),
             builder: (context, snapshot) {
               final unreadCount = snapshot.data ?? 0;
               final hasUnread = unreadCount > 0;
@@ -1377,13 +1469,28 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 32),
-            Text(
-              'Lowongan Terbaru',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: theme.textTheme.titleLarge?.color,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Lowongan Terbaru',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: theme.textTheme.titleLarge?.color,
+                    ),
+                  ),
+                ),
+                if (isRefreshingJobs && !isLoading)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 16),
             if (isLoading)

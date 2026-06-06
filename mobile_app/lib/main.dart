@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
+
 import 'core/constants/app_colors.dart';
 import 'features/gesture_assist/models/gesture_log_model.dart';
 import 'features/gesture_assist/providers/camera_provider.dart';
 import 'features/profile/accessibility_settings_view.dart';
 import 'features/splash/splash_view.dart';
+import 'services/connectivity_service.dart';
 import 'services/mongo_service.dart';
 import 'services/offline_service.dart';
 import 'services/sync_service.dart';
@@ -31,12 +33,24 @@ void main() async {
 
     await dotenv.load(fileName: ".env");
     await OfflineService.init();
-    await MongoService.connect();
+
+    // Inisialisasi status koneksi global.
+    // MongoService akan membaca connectivityService.isOnline
+    // agar tidak perlu DNS lookup berulang di setiap query.
+    await connectivityService.init();
+
+    // MongoDB warm-up berjalan di background agar startup aplikasi tidak tertahan.
+    unawaited(
+      MongoService.connect().catchError((error) {
+        print('⚠️ Mongo warm-up failed: $error');
+      }),
+    );
 
     // Register Adapter and Open Box for GestureLog
     if (!Hive.isAdapterRegistered(GestureLogModelAdapter().typeId)) {
       Hive.registerAdapter(GestureLogModelAdapter());
     }
+
     await Hive.openBox<GestureLogModel>('gestureLogs');
 
     runApp(
@@ -77,11 +91,6 @@ class JobAbleApp extends StatefulWidget {
 
 class _JobAbleAppState extends State<JobAbleApp> {
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<double>(
       valueListenable: AccessibilityController.textScaleNotifier,
@@ -93,7 +102,8 @@ class _JobAbleAppState extends State<JobAbleApp> {
               title: 'JobAble',
               debugShowCheckedModeBanner: false,
               builder: (context, child) {
-                // Inisialisasi SyncService di sini agar ScaffoldMessenger tersedia
+                // Inisialisasi SyncService di sini agar ScaffoldMessenger tersedia.
+                // Pastikan SyncService.initialize() punya guard supaya tidak listen berkali-kali.
                 SyncService.initialize(context);
 
                 Widget app = MediaQuery(
